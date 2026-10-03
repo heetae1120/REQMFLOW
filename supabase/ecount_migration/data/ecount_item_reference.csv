@@ -1,0 +1,284 @@
+﻿item_code,representative_name,alias_count,first_source_row,review_status,is_active
+[REQM]-QP10B,QP10B,1,300,confirmed,true
+[REQM]-QP20B,QP20B,1,301,confirmed,true
+[RQM]-QM1000SWH-C,QM1000S,1,122,confirmed,true
+[RQM]-QMP5-WH,QMP5 화이트,2,430,confirmed,true
+[RQM]-QP1000A1-BK,QP1000A 블랙,1,191,confirmed,true
+[RQM]-QP1000A1-BL,QP1000A 블루,1,255,confirmed,true
+[RQM]-QP1000A1-PK,QP1000A 핑크,1,256,confirmed,true
+[RQM]-QP1000A1-WH,QP1000A 화이트,1,192,confirmed,true
+[RQM]-QP1000C1-BK,QP1000C 블랙,2,181,confirmed,true
+[RQM]-QP1000C1-BL,QP1000C 블루,2,326,confirmed,true
+[RQM]-QP1000C1-PK,QP1000C 핑크,2,179,confirmed,true
+[RQM]-QP1000C1-WH,QP1000C 화이트,2,180,confirmed,true
+[RQM]-QP2000A-Beige,qp2000a 베이지,1,128,confirmed,true
+[RQM]-QP2000A-Green,qp2000a 그린,2,129,confirmed,true
+[RQM]-QP2000C1-Beige,QP2000C 베이지,2,335,confirmed,true
+[RQM]-QP2000C1-BK,QP2000C 블랙,2,337,confirmed,true
+[RQM]-QP2000C1-Green,QP2000C 포레그린,2,336,confirmed,true
+[RQM]-QP2000C1-WH,QP2000C 화이트,2,334,confirmed,true
+[RQM]-QP5000A-KA,QP5000A 카키,2,23,confirmed,true
+[RQM]-QP5000A-SB,QP5000A 샌드베이지,1,65,confirmed,true
+00094,와인 에어레이터 건전지,1,184,confirmed,true
+17인치합금삼단봉,요히봉,1,208,confirmed,true
+선물포장,SP-HW920 졸리트리포장지,4,210,confirmed,true
+애플워치 스트랩 빅 그레이,WS-Big-Skygrey,1,141,confirmed,true
+애플워치 스트랩 빅 그린,WS-Big-Green,1,137,confirmed,true
+애플워치 스트랩 빅 블루,WS-Big-Blue,2,133,confirmed,true
+애플워치 스트랩 빅 아이보리,WS-Big-Ivory,1,139,confirmed,true
+애플워치 스트랩 빅 옐로우,WS-Big-Yellow,1,143,confirmed,true
+애플워치 스트랩 빅 탄,WS-Big-Brown,1,145,confirmed,true
+애플워치 스트랩 스몰 그레이,WS-Small-Skygrey,1,142,confirmed,true
+애플워치 스트랩 스몰 그린,WS-Small-Green,1,138,confirmed,true
+애플워치 스트랩 스몰 블루,WS-Small-Blue,2,134,confirmed,true
+애플워치 스트랩 스몰 아이보리,WS-Small-Ivory,1,140,confirmed,true
+애플워치 스트랩 스몰 옐로우,WS-Small-Yellow,1,144,confirmed,true
+애플워치 스트랩 스몰 탄,WS-Small-Brown,1,146,confirmed,true
+택배운송비,배송비,1,48,confirmed,true
+흡착패드-블랙,다용도 흡착판 블랙,2,27,confirmed,true
+흡착패드-화이트,다용도 흡착판 화이트,2,28,confirmed,true
+ACONE-Sliconpad_SA,ACONE 실리콘패드,2,317,confirmed,true
+CASE-lT-더스트백,더스트백,1,126,confirmed,true
+CASE-QCM-I14,맥세이프케이스 아이폰14,1,239,confirmed,true
+CASE-QCM-I14P,맥세이프케이스 아이폰14 프로,1,240,confirmed,true
+CASE-QCM-I14PM,맥세이프케이스 아이폰14 프로맥스,1,241,confirmed,true
+CASE-QP1000-Hand-GlB,QP1000C 실리콘케이스 야광핸디형_블루,2,474,confirmed,true
+CASE-QP1000-Hand-GlG,QP1000C 실리콘케이스 야광핸디형_그린,2,476,confirmed,true
+CASE-QP1000-Hand-GlO,QP1000C 실리콘케이스 야광핸디형_오렌지,2,475,confirmed,true
+CASE-QP1000-Hand-GlY,QP1000C 실리콘케이스 야광핸디형_옐로우,2,473,confirmed,true
+CASE-QP1000A-Ebony,실리콘 케이스 - 에보니,3,153,confirmed,true
+CASE-QP1000A-Lavende,실리콘 케이스 - 라벤더,3,150,confirmed,true
+CASE-QP1000A-Mint,실리콘 케이스 - 민트,3,152,confirmed,true
+CASE-QP1000A-Sand,실리콘 케이스 - 샌드,3,151,confirmed,true
+CASE-QP1000C-Hand-Bl,QP1000C 실리콘케이스 핸디형 - 블루,2,358,confirmed,true
+CASE-QP1000C-Hand-Cl,QP1000C 실리콘케이스 핸디형 - 클라우드,2,356,confirmed,true
+CASE-QP1000C-Hand-Eb,QP1000C 실리콘케이스 핸디형 - 에보니,2,354,confirmed,true
+CASE-QP1000C-Hand-Gr,QP1000C 실리콘케이스 핸디형 - 그린,2,359,confirmed,true
+CASE-QP1000C-Hand-La,QP1000C 실리콘케이스 핸디형 - 라벤더,2,355,confirmed,true
+CASE-QP1000C-Hand-Mi,QP1000C 실리콘케이스 핸디형 - 민트,2,352,confirmed,true
+CASE-QP1000C-Hand-PK,QP1000C 실리콘케이스 핸디형_핑크,2,362,confirmed,true
+CASE-QP1000C-Hand-Pu,QP1000C 실리콘케이스 핸디형 - 퍼플,1,361,confirmed,true
+CASE-QP1000C-Hand-Re,QP1000C 실리콘케이스 핸디형 - 레드,2,357,confirmed,true
+CASE-QP1000C-Hand-Sa,QP1000C 실리콘케이스 핸디형 - 샌드,2,353,confirmed,true
+CASE-QP1000C-Hand-Ye,QP1000C 실리콘케이스 핸디형 - 옐로우,2,360,confirmed,true
+CASE-QP2000-Hand-GlB,QP2000C 실리콘케이스 야광핸디형_블루,2,479,confirmed,true
+CASE-QP2000-Hand-GlG,QP2000C 실리콘케이스 야광핸디형_그린,2,478,confirmed,true
+CASE-QP2000-Hand-GlO,QP2000C 실리콘케이스 야광핸디형_오렌지,2,480,confirmed,true
+CASE-QP2000-Hand-GlY,QP2000C 실리콘케이스 야광핸디형_옐로우,2,481,confirmed,true
+CASE-QP2000A_LT_M,브라우니백,1,96,confirmed,true
+CASE-QP2000A_LT_WBG,미니마실백 베이지,2,93,confirmed,true
+CASE-QP2000A_LT_WBL,미니마실백 스카이블루,2,94,confirmed,true
+CASE-QP2000A_LT_WPP,미니마실백 라벤더,2,102,confirmed,true
+CASE-QP2000A_LT_WWH,마실백 화이트,1,114,confirmed,true
+CASE-QP2000C_Hand_La,QP2000C 실리콘케이스 핸디형_라벤더,2,371,confirmed,true
+CASE-QP2000C_Hand_Mi,QP2000C 실리콘케이스 핸디형_민트,2,369,confirmed,true
+CASE-QP2000C_Hand_PK,QP2000C 실리콘케이스 핸디형_핑크,2,372,confirmed,true
+CASE-QP2000C_Hand_Sa,QP2000C 실리콘케이스 핸디형_샌드,2,370,confirmed,true
+CASE-QP2000C-Blue,QP2000C 실리콘케이스 기본형 - 블루,2,346,confirmed,true
+CASE-QP2000C-Cloud,QP2000C 실리콘케이스 기본형 - 클라우드,2,344,confirmed,true
+CASE-QP2000C-Ebony,QP2000C 실리콘케이스 기본형 - 에보니,2,342,confirmed,true
+CASE-QP2000C-Green,QP2000C 실리콘케이스 기본형 - 그린,2,314,confirmed,true
+CASE-QP2000C-Lavende,QP2000C 실리콘케이스 기본형 - 라벤더,2,343,confirmed,true
+CASE-QP2000C-Mint,QP2000C 실리콘케이스 기본형 - 민트,2,340,confirmed,true
+CASE-QP2000C-PINK,QP2000C 실리콘케이스 기본형 - 핑크,2,350,confirmed,true
+CASE-QP2000C-purple,QP2000C 실리콘케이스 기본형 - 퍼플,1,349,confirmed,true
+CASE-QP2000C-Red,QP2000C 실리콘케이스 기본형 - 레드,2,345,confirmed,true
+CASE-QP2000C-Sand,QP2000C 실리콘케이스 기본형 - 샌드,2,341,confirmed,true
+CASE-QP2000C-Yellow,QP2000C 실리콘케이스 기본형 - 옐로우,2,348,confirmed,true
+CBL-L300-CT,C타입 롱케이블 3M,1,42,confirmed,true
+CBL-T120F-3in1,T120F,2,243,confirmed,true
+FAN-QNF100,넥풍기,3,86,confirmed,true
+FAN-QTF100-GR,댕글타프팬 그린,5,31,confirmed,true
+FAN-QTF100-WH,댕글타프팬 화이트,3,33,confirmed,true
+GOOUTstciker_TRAVEL,GOOUTstciker_TRAVEL,1,783,confirmed,true
+gooutsticker_001,스티커 2컬러 SET,1,193,confirmed,true
+gooutsticker_002,스티커 2컬러 SET 2,1,194,confirmed,true
+HARDPOUCH-열도장,멀티 하드 케이스,4,46,confirmed,true
+LANTERN-POUCH,랜턴 파우치,1,57,confirmed,true
+MTB100_다용도멀티백,타프팬 멀티백,2,41,confirmed,true
+Panel_QWC-Q3100-REQM,Q3100 앞판-REQM,1,68,confirmed,true
+PD35W_5PORT_BK,여행용어댑터- 블랙,1,185,confirmed,true
+PD35W_5PORT_WH,여행용어댑터- 화이트,1,190,confirmed,true
+POUCH-Tarpaulin_F-GR,타포린파우치 - 그레이,2,400,confirmed,true
+POUCH-Tarpaulin-BK,타포린 파우치 블랙,2,289,confirmed,true
+POUCH-Tarpaulin-BLUE,타포린 파우치 블루,2,290,confirmed,true
+POUCH-Tarpaulin-RED,타포린 파우치 레드,2,291,confirmed,true
+POUCH-Tarpaulin-WH,타포린 파우치 화이트,2,293,confirmed,true
+POUCH-Tarpaulin-YL,타포린 파우치 옐로우,2,292,confirmed,true
+QA_Keyring_AC_XMAS,GOOUT 아크릴 키링 - 쿠키,1,517,confirmed,true
+QA-Custumpouch_BE,커스텀파우치 - 베이지,1,381,confirmed,true
+QA-Custumpouch_BK,커스텀파우치 - 블랙,2,378,confirmed,true
+QA-Custumpouch_BL,커스텀파우치 - 블루,2,377,confirmed,true
+QA-Custumpouch_GR,커스텀파우치 - 그린,2,380,confirmed,true
+QA-Custumpouch_YL,커스텀파우치 - 옐로우,2,379,confirmed,true
+QA-Jibbitz_CAMPING,GO OUT 지비츠 참 스티커팩 - 캠핑,1,513,confirmed,true
+QA-Jibbitz_TRAVEL,GO OUT 지비츠 참 스티커팩 - 여행,1,514,confirmed,true
+QA-KeyRing_M,QA-KeyRing_M,1,793,confirmed,true
+QA-KeyRing_Q,GOOUT 젤리키링 - Q 옐로우,1,506,confirmed,true
+QA-KeyRing_R,GOOUT 젤리키링 - R 베이지,2,507,confirmed,true
+QA-Luggagescale_BK,캐리어저울 블랙,2,375,confirmed,true
+QA-Luggagescale_WH,캐리어저울 화이트,2,376,confirmed,true
+QA-Minihardpouch_BE,미니 커스텀파우치 - 베이지,2,496,confirmed,true
+QA-Minihardpouch_BK,미니 커스텀파우치 - 블랙,2,498,confirmed,true
+QA-Minihardpouch_BL,미니 커스텀파우치 - 블루,2,499,confirmed,true
+QA-Minihardpouch_GR,미니 커스텀파우치 - 그린,2,497,confirmed,true
+QA-Minihardpouch_YL,미니 커스텀파우치 - 옐로우,2,495,confirmed,true
+QA-Rug_GOOUT_BL,GOOUT 러그 - 블루,1,501,confirmed,true
+QA-Rug_GOOUT_GR,GOOUT 러그 - 그린,1,503,confirmed,true
+QA-Rug_GOOUT_RD,GOOUT 러그 - 레드,1,502,confirmed,true
+QA-Rug_GOOUT_YL,GOOUT 러그 - 옐로우,1,500,confirmed,true
+QA-UVSticker,UV 판박이스티커,4,456,confirmed,true
+QC30-CPD520-BK,CPD520 블랙,1,383,confirmed,true
+QC30-CPD520-WH,CPD520 화이트,1,384,confirmed,true
+QC30-QPD250,QPD250,2,98,confirmed,true
+QC30-QPD250-BL,QPD250 블루,1,235,confirmed,true
+QC30-QPD250-PK,QPD250 핑크,1,236,confirmed,true
+QCB-CC30S_Butter,30cm 크레용케이블 버터,3,418,confirmed,true
+QCB-CC30S_Carrot,30cm 크레용케이블 캐롯,3,419,confirmed,true
+QCB-CC30S_CobaltBlue,30cm 크레용케이블 코발트블루,3,420,confirmed,true
+QCB-CC30S_Lavender,30cm 크레용케이블 라벤더,3,421,confirmed,true
+QCB-CC30S_NeonGreen,30cm 크레용케이블 네온그린,3,422,confirmed,true
+QCB-CC60S_Butter,60cm 크레용케이블 버터,3,424,confirmed,true
+QCB-CC60S_Carrot,60cm 크레용케이블 캐롯,3,425,confirmed,true
+QCB-CC60S_CobaltBlue,60cm 크레용케이블 코발트블루,3,426,confirmed,true
+QCB-CC60S_Lavender,60cm 크레용케이블 라벤더,3,427,confirmed,true
+QCB-CC60S_NeonGreen,60cm 크레용케이블 네온그린,3,428,confirmed,true
+QMA-Bubblepad_Bk,맥세이프버블패드 소프트 블랙,2,465,confirmed,true
+QMA-Bubblepad_Bl,맥세이프버블패드 소프트 블루,2,464,confirmed,true
+QMA-Bubblepad_La,맥세이프버블패드 소프트 라벤더,2,463,confirmed,true
+QMA-Bubblepad_Mi,맥세이프버블패드 소프트 민트,2,461,confirmed,true
+QMA-Bubblepad_Or,맥세이프버블패드 오렌지,2,446,confirmed,true
+QMA-Bubblepad-Cr,맥세이프버블패드 소프트 크림,2,462,confirmed,true
+QMA-Cardwallet_AGY,맥세이프 카드지갑 - 애쉬그레이,2,450,confirmed,true
+QMA-Cardwallet_BE,맥세이프 카드지갑 - 베이지,2,453,confirmed,true
+QMA-Cardwallet_BR,맥세이프 카드지갑 - 브라운,2,404,confirmed,true
+QMA-Cardwallet_DBR,맥세이프 카드지갑 - 다크브라운,2,454,confirmed,true
+QMA-Cardwallet_GR,맥세이프 카드지갑 - 그린,2,405,confirmed,true
+QMA-Cardwallet_NA,맥세이프 카드지갑 - 네이비,2,407,confirmed,true
+QMA-Cardwallet_OR,맥세이프 카드지갑 - 오렌지,2,406,confirmed,true
+QMA-Cardwallet_PK,맥세이프 카드지갑 - 핑크,2,451,confirmed,true
+QMA-Cardwallet_SGY,맥세이프 카드지갑 - 솔리드그레이,2,452,confirmed,true
+QMA-Ringsticker_BK,맥세이프플레이트,2,399,confirmed,true
+QMA-SilRing_BL,맥세이프 실링 - 블루,1,469,confirmed,true
+QMA-SilRing_EB,맥세이프 실링 - 에보니,1,487,confirmed,true
+QMA-SilRing_GR,맥세이프 실링 - 그린,1,488,confirmed,true
+QMA-SilRing_RD,맥세이프 실링 - 레드,1,470,confirmed,true
+QMA-SilRing_SA,맥세이프 실링 - 샌드,2,316,confirmed,true
+QMA-SilRing_YL,맥세이프 실링 - 옐로우,1,471,confirmed,true
+QMC-ACONE-MB,ACONE 모닝브리즈,2,483,confirmed,true
+QMC-ACONE-MS,ACONE 미드나잇섀도우,2,792,confirmed,true
+QMC-ACONE-SS,ACONE 선셋,2,484,confirmed,true
+QMC-ACONE-WL,ACONE 원더랜드,2,494,confirmed,true
+QMC-QM4100_GY,QM4100 솔리드그레이,1,444,confirmed,true
+QMC-QM4100_WH,QM4100 소프트화이트,1,445,confirmed,true
+QMC-T3100_BE,QMC-T3100_BE,1,785,confirmed,true
+QMC-T3100_BK,T3100 - 블랙,2,786,confirmed,true
+QMS-QMS01_BK,QMS01 블랙,2,397,confirmed,true
+QP1000A-POUCH,QP1000A 파우치,4,199,confirmed,true
+QP1000C1-Butter,QP1000C 버터,2,330,confirmed,true
+QP1000C1-Carrot,QP1000C 캐롯,2,331,confirmed,true
+QP1000C1-CobaltBlue,QP1000C 코발트블루,2,329,confirmed,true
+QP1000C1-NeonGreen,QP1000C 네온그린,2,332,confirmed,true
+QP2000C_SageMint,QP2000C 세이지민트,2,490,confirmed,true
+QP2000C_TomatoRed,QP2000C 토마토레드,2,491,confirmed,true
+QPD-330_BL,QPD330 블루,2,413,confirmed,true
+QPD-330_PK,QPD330 핑크,2,414,confirmed,true
+QPD-330_SGY,QPD330 솔리드그레이,2,415,confirmed,true
+QPD-330_WH,QPD330 소프트화이트,2,416,confirmed,true
+QPD-365N_GY,QPD365N 그레이,2,410,confirmed,true
+QPD-365N_WH,QPD365N 화이트,2,411,confirmed,true
+QS-QST01M_BK,미니셀카봉 블랙,3,8,confirmed,true
+QS-QST01M_WH,미니셀카봉 화이트,3,9,confirmed,true
+QTC-45W_BK,45W 여행용어댑터 - 블랙,2,520,confirmed,true
+QTC-45W_WH,45W 여행용어댑터 - 화이트,2,521,confirmed,true
+QWC-A1500A,QWC-A1500,1,95,confirmed,true
+QWC-B1500-BK,QWC-B1500 블랙,1,401,confirmed,true
+QWC-CW500,CW500,3,89,confirmed,true
+QWC-L5100-A,QWC-L5100 애플워치,5,121,confirmed,true
+QWC-L5100-S,QWC-L5100S 갤럭시워치전용,4,148,confirmed,true
+QWC-P150-BK,P150 블랙,1,104,confirmed,true
+QWC-P150-WH,p150 화이트,1,130,confirmed,true
+QWC-Q1500GR,QWC-Q1500 그레이,3,20,confirmed,true
+QWC-Q1500PK,QWC-Q1500 핑크,2,22,confirmed,true
+QWC-Q1500WH,QWC-Q1500 화이트,3,21,confirmed,true
+QWC-Q3100-BK,Q3100 그레이(애플워치전용),1,249,confirmed,true
+QWC-Q3100-WH,Q3100 화이트(애플워치전용),1,248,confirmed,true
+QWC-Q3100S-BK,QWC-Q3100 그레이(갤럭시 워치전용),4,50,confirmed,true
+QWC-Q3100S-BK_PM,Q3100S(갤럭시) 블랙-판촉용,1,69,confirmed,true
+QWC-Q3100S-WH,QWC-Q3100 화이트(갤럭시 워치전용),6,51,confirmed,true
+QWC-QS1500-BL,QWC-QS1500 파스텔 블루,3,269,confirmed,true
+QWC-QS1500-GR,QS1500 파스텔 그린,3,186,confirmed,true
+QWC-QS1500-PK,QWC-QS1500 파스텔 핑크,4,270,confirmed,true
+QWC-T2505-BK,T2505 블랙,2,78,confirmed,true
+QWC-T2505-WH,T2505 화이트,2,83,confirmed,true
+QWS-V5-WH,QWS-V5 화이트,1,374,confirmed,true
+QWS-V7-BK,QWS-V7 블랙,2,14,confirmed,true
+QWS-V7-GR,QWS-V7 그린,2,12,confirmed,true
+QWS-V7-PK,QWS-V7 핑크,2,13,confirmed,true
+QWS-V7-WH,QWS-V7 화이트,2,15,confirmed,true
+RQM-CC100-CK,CC100K,2,195,confirmed,true
+RQM-CC100-CS,CC100S,1,197,confirmed,true
+RQM-CC120-CK_RT,회전형 CC120 K,2,71,confirmed,true
+RQM-CC150-CK-BL,CC150K 블루,2,260,confirmed,true
+RQM-CC150-CK-PK,CC150K 핑크,2,259,confirmed,true
+RQM-CC150-CS-GR,60W 케이블 솔리드그레이,1,385,confirmed,true
+RQM-CC150-CS-WH,60W 케이블 소프트화이트,1,386,confirmed,true
+RQM-MFICA150-CS,실리콘케이블8핀,3,233,confirmed,true
+RQM-QWP1500_BK,QWP1500 블랙,1,25,confirmed,true
+RQM-QWP1500_WH,QWP1500 화이트,1,26,confirmed,true
+SB-M100,소문 블루투스 마이크,2,267,confirmed,true
+SB-M100-스펀지,소문 블루투스 마이크 스펀지,1,268,confirmed,true
+SE-AE100,와인 에어레이터,1,79,confirmed,true
+SE-HF100-NA,HF100 네이비,2,75,confirmed,true
+SE-HF100-PK,HF100 핑크,2,74,confirmed,true
+SE-HF100-WH,HF100 화이트,2,73,confirmed,true
+SE-PM100a,무선핀마이크 싱글 8핀,1,313,confirmed,true
+SE-PM100A,핀마이크 싱글 싱글 8핀,1,115,confirmed,true
+SE-PM100C,핀마이크 싱글 싱글 C타입,2,116,confirmed,true
+SE-PM200A,핀마이크 싱글 듀얼 8핀,2,117,confirmed,true
+SE-PM200C,핀마이크 싱글 듀얼 C타입,2,118,confirmed,true
+SE-WC100,SE-WC100,1,2,confirmed,true
+SE-WC100A,WC100A,2,3,confirmed,true
+SE-WC200,SE-WC200,1,5,confirmed,true
+SE-WC300,SE-WC300,1,6,confirmed,true
+SE-WC500,SE-WC500,1,7,confirmed,true
+SET-SOMEONE-BLUE,SOMEONE_블루 (포장지확인),5,278,confirmed,true
+SET-SOMEONE-PINK,SOMEONE_핑크 (포장지확인),7,277,confirmed,true
+SOMEONE-BLUE,SOMEONE_블루 (포장지확인) 디펑,3,467,confirmed,true
+SOTHING-신발건조기-N,신발건조기 네이비,1,108,confirmed,true
+SOTHING-신발건조기-W,신발건조기 화이트,1,107,confirmed,true
+SOTHING-훈증등액상,리퀴드 액상,1,97,confirmed,true
+SP-일체형8핀,일체형 미니 보조배터리 8핀,2,230,confirmed,true
+SP-A20W일체형,일체형 보조배터리 - 고속 8핀,2,262,confirmed,true
+SP-AC50-공용(8핀),SP-AC50 8핀,1,198,confirmed,true
+SP-C200-WH,SP-C200 (보조배터리),1,103,confirmed,true
+SP-C20W일체형,소문일체형 - 고속 C타입,2,261,confirmed,true
+SP-C타입일체형,일체형 미니 보조배터리 C타입,2,231,confirmed,true
+SP-CA50-공용(C타입),SP-CA50 C타입,1,154,confirmed,true
+SP-HW920-올리브-일반,HW920 올리브그린,4,203,confirmed,true
+SP-HW920-핑크-일반,SP-HW920 파스텔핑크,4,204,confirmed,true
+SW-S150-WH,S150 화이트,1,187,confirmed,true
+TC-QC30-CTWH,QC3000,1,303,confirmed,true
+VAUX-QCL100-그린,QCL100 올리브그린,2,52,confirmed,true
+VAUX-QCL100-레드,QCL100 레드,1,70,confirmed,true
+VAUX-QCL100-블랙,QCL100 블랙,2,53,confirmed,true
+VAUX-QCL100-블루,복스랜턴 블루,3,76,confirmed,true
+VAUX-QCL100-샌드,QCL100 베이지,3,66,confirmed,true
+VAUX-QCL100-화이트,QCL100 화이트,2,54,confirmed,true
+VAUX-QTF200-GR,QTF200 그레이,1,91,confirmed,true
+VAUX-QTF200-WH,QTF200 화이트,1,90,confirmed,true
+Velcro-tie_1M,벨크로타이 1M,3,59,confirmed,true
+Velcro-tie_3M,벨크로타이 3M,3,60,confirmed,true
+VX-M100,VAUX 훈증등,1,92,confirmed,true
+WS-Big-Blue,애플워치 스트랩 빅 블루,1,160,confirmed,true
+WS-Big-Brown,애플워치 스트랩 빅 블루,3,162,confirmed,true
+WS-Big-Green,애플워치스트랩 뱀부/그린 L,1,164,confirmed,true
+WS-Big-Ivory,애플워치스트랩 아이보리 L,2,166,confirmed,true
+WS-Big-Skygrey,애플워치 스트랩 빅 그레이,1,168,confirmed,true
+WS-Big-Yellow,애플워치 스트랩 빅 옐로우,1,170,confirmed,true
+WS-Small-Blue,애플워치 스트랩 스몰 블루,1,161,confirmed,true
+WS-Small-Brown,애플워치 스트랩 스몰 블루,2,163,confirmed,true
+WS-Small-Green,애플워치스트랩 뱀부/그린 S,2,165,confirmed,true
+WS-Small-Ivory,애플워치스트랩 아이보리 S,2,167,confirmed,true
+WS-Small-Skygrey,애플워치 스트랩 스몰 그레이,1,169,confirmed,true
+WS-Small-Yellow,애플워치 스트랩 스몰 옐로우,2,171,confirmed,true

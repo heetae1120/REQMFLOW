@@ -1,0 +1,43 @@
+{
+  "valid": true,
+  "source_file": "C:/Users/82104/OneDrive/Desktop/위킵_이카운트_양식 추가.xlsx",
+  "generated_at": "2026-07-30T01:34:51.602Z",
+  "counts": {
+    "ecount_item_reference.csv": 283,
+    "ecount_item_aliases.csv": 533,
+    "ecount_sales_channels.csv": 105,
+    "ecount_product_mappings.csv": 772,
+    "ecount_product_mapping_components.csv": 1410,
+    "ecount_price_rules.csv": 1840,
+    "ecount_price_rule_components.csv": 4471,
+    "ecount_migration_issues.csv": 48
+  },
+  "price_rule_statuses": {
+    "missing_item": 12,
+    "confirmed": 1799,
+    "zero_price_review": 15,
+    "amount_mismatch": 14
+  },
+  "issue_types": {
+    "item_alias_unusable": 1,
+    "item_alias_missing_code": 1,
+    "item_alias_conflict": 4,
+    "price_component_missing_item": 12,
+    "price_component_zero_price": 15,
+    "price_rule_amount_mismatch": 15
+  },
+  "checks": {
+    "product_mapping_component_codes_exist": true,
+    "price_source_rows_covered": true,
+    "price_source_row_count": 4471,
+    "covered_price_component_rows": 4471,
+    "structural_errors": []
+  },
+  "update_summary": {
+    "new_product_mappings": 28,
+    "new_price_rules": 232,
+    "duplicate_price_rules_skipped": 6,
+    "duplicated_source_blocks_deduplicated": 2,
+    "duplicate_product_mappings_skipped": 1
+  }
+}

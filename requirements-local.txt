@@ -1,0 +1,7 @@
+openpyxl>=3.1,<4
+xlrd>=2.0,<3
+supabase>=2.6,<3
+pystray>=0.19,<1
+Pillow>=10,<13
+msoffcrypto-tool>=6,<7
+tkinterdnd2>=0.6,<1
