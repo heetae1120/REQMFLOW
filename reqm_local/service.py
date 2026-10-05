@@ -82,7 +82,7 @@ class Operations:
             order_id TEXT REFERENCES orders(id), component INTEGER, qty INTEGER NOT NULL,
             UNIQUE(order_id, component));
         CREATE TABLE IF NOT EXISTS shipments(id TEXT PRIMARY KEY, line_id TEXT REFERENCES request_lines(id),
-            qty INTEGER NOT NULL, tracking TEXT NOT NULL, day TEXT NOT NULL, erp_id TEXT,
+            qty INTEGER NOT NULL, tracking TEXT NOT NULL, day TEXT NOT NULL, erp_id TEXT, erp_amount TEXT,
             UNIQUE(line_id,tracking,day));
         CREATE TABLE IF NOT EXISTS fees(bundle TEXT PRIMARY KEY, erp_id TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY, kind TEXT NOT NULL, day TEXT NOT NULL,
@@ -92,6 +92,9 @@ class Operations:
         event_columns = {row['name'] for row in self.db.execute('PRAGMA table_info(event_rules)')}
         if 'components' not in event_columns:
             self.db.execute("ALTER TABLE event_rules ADD COLUMN components TEXT NOT NULL DEFAULT '[]'")
+        shipment_columns = {row['name'] for row in self.db.execute('PRAGMA table_info(shipments)')}
+        if 'erp_amount' not in shipment_columns:
+            self.db.execute("ALTER TABLE shipments ADD COLUMN erp_amount TEXT")
 
     def close(self):
         self.db.close()
@@ -729,13 +732,58 @@ class Operations:
                 done = self.db.execute('SELECT COALESCE(SUM(qty),0) FROM shipments WHERE line_id=?', (line_id,)).fetchone()[0]
                 if done + q > line['qty']:
                     raise ValueError('출고수량이 요청수량을 초과합니다. 이번 입력은 취소됩니다.')
-                self.db.execute('INSERT INTO shipments VALUES(?,?,?,?,?,NULL)', (uuid.uuid4().hex,line_id,q,tracking,shipped_on))
+                order_row = self.db.execute('SELECT components FROM orders WHERE id=?', (line['order_id'],)).fetchone()
+                component = json.loads(order_row['components'])[line['component']]
+                full = number(component['amount'])
+                cumulative = lambda value: (full*Decimal(value)/Decimal(component['quantity'])).quantize(Decimal('1'),rounding=ROUND_HALF_UP)
+                suggested_amount = cumulative(done+q)-cumulative(done)
+                self.db.execute(
+                    'INSERT INTO shipments(id,line_id,qty,tracking,day,erp_id,erp_amount) VALUES(?,?,?,?,?,NULL,?)',
+                    (uuid.uuid4().hex,line_id,q,tracking,shipped_on,str(suggested_amount)),
+                )
                 added += 1
                 totals = self.db.execute('SELECT SUM(qty) FROM request_lines WHERE order_id=?', (line['order_id'],)).fetchone()[0]
                 shipped = self.db.execute('SELECT SUM(s.qty) FROM shipments s JOIN request_lines r ON s.line_id=r.id WHERE r.order_id=?', (line['order_id'],)).fetchone()[0]
                 self.db.execute('UPDATE orders SET state=? WHERE id=?', ('출고 완료' if totals == shipped else '부분 출고',line['order_id']))
             self.event('물류 결과 반영', f'신규 {added}, 중복 {duplicates}')
         return added, duplicates
+
+    def pending_erp_shipments(self, on=None):
+        """Return actual shipments waiting for ERP, including their editable ERP amount."""
+        parameters = []
+        condition = 's.erp_id IS NULL'
+        if on:
+            condition += ' AND s.day=?'
+            parameters.append(day(on))
+        rows = self.db.execute(f'''SELECT s.*, r.order_id, r.component
+            FROM shipments s JOIN request_lines r ON s.line_id=r.id
+            WHERE {condition} ORDER BY s.day,s.rowid''', parameters).fetchall()
+        orders = {order['id']:order for order in self.orders()}
+        result = []
+        for row in rows:
+            order = orders[row['order_id']]
+            data = order['data']
+            component = order['components'][row['component']]
+            result.append({
+                'id':row['id'], 'day':row['day'], 'order_no':data['order_no'],
+                'recipient':data['recipient'], 'product':component.get('name') or component.get('code',''),
+                'code':component.get('code',''), 'quantity':row['qty'],
+                'amount':row['erp_amount'] or '', 'tracking':row['tracking'],
+            })
+        return result
+
+    def set_erp_amount(self, shipment_id, amount):
+        value = number(amount)
+        if value != value.to_integral_value():
+            raise ValueError('ERP 반영 금액은 원 단위 정수로 입력하세요.')
+        with self.db:
+            row = self.db.execute('SELECT erp_id FROM shipments WHERE id=?', (shipment_id,)).fetchone()
+            if not row:
+                raise ValueError('실제 출고 내역을 찾지 못했습니다.')
+            if row['erp_id']:
+                raise ValueError('이미 ERP 파일에 반영된 출고 건은 금액을 변경할 수 없습니다.')
+            self.db.execute('UPDATE shipments SET erp_amount=? WHERE id=?', (str(value),shipment_id))
+            self.event('ERP 금액 매칭', f'{shipment_id}: {value}')
 
     def export_erp(self, on, through, path):
         on, through = day(on), day(through)
@@ -744,6 +792,9 @@ class Operations:
             JOIN request_lines r ON s.line_id=r.id WHERE s.erp_id IS NULL AND s.day<=? ORDER BY s.day,s.rowid''', (through,)).fetchall()
         if not pending:
             raise ValueError('선택한 날짜까지 ERP 파일에 반영하지 않은 실제 출고가 없습니다.')
+        unmatched = [shipment for shipment in pending if shipment['erp_amount'] in (None,'')]
+        if unmatched:
+            raise ValueError(f'ERP 금액 매칭이 필요한 실제 출고가 {len(unmatched):,}건 있습니다.')
         rows = []
         orders = {o['id']:o for o in self.orders()}
         def append(c, q, amount):
@@ -758,10 +809,7 @@ class Operations:
             for shipment in pending:
                 order = orders[shipment['order_id']]
                 c = order['components'][shipment['component']]
-                before = self.db.execute('SELECT COALESCE(SUM(qty),0) FROM shipments WHERE line_id=? AND erp_id IS NOT NULL', (shipment['line_id'],)).fetchone()[0]
-                full = number(c['amount'])
-                cumulative = lambda q: (full*Decimal(q)/Decimal(c['quantity'])).quantize(Decimal('1'),rounding=ROUND_HALF_UP)
-                append(c, shipment['qty'], cumulative(before+shipment['qty'])-cumulative(before))
+                append(c, shipment['qty'], number(shipment['erp_amount']))
                 self.db.execute('UPDATE shipments SET erp_id=? WHERE id=?', (batch,shipment['id']))
             groups = {}
             for order in orders.values():

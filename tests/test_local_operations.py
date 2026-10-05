@@ -178,6 +178,29 @@ class LocalTests(unittest.TestCase):
         self.s.mark_registered(batch);self.s.reexport(batch,self.folder/'again.xlsx')
         self.assertEqual((self.folder/'again.xlsx').read_bytes(),(self.folder/'second.xlsx').read_bytes())
 
+    def test_actual_shipment_amount_can_be_rematched_before_erp_export(self):
+        _,order=self.import_order(amount=10000,fee=0)
+        line=self.request(order)
+        self.result(line,3,on='2026-10-05')
+        pending=self.s.pending_erp_shipments('2026-10-05')
+        self.assertEqual(len(pending),1)
+        self.assertEqual(pending[0]['amount'],'10000')
+        self.s.set_erp_amount(pending[0]['id'],'12345')
+        path=self.folder/'rematched.xlsx'
+        self.s.export_erp('2026-10-05','2026-10-05',path)
+        book=load_workbook(path,data_only=True)
+        total=sum(row[15]*row[16] for row in list(book.active.values)[1:])
+        book.close()
+        self.assertEqual(total,12345)
+
+    def test_pending_erp_shipments_are_filtered_by_actual_shipping_day(self):
+        _,first=self.import_order(line='A1');line_one=self.request(first)
+        self.result(line_one,3,tracking='T1',on='2026-10-04')
+        _,second=self.import_order(line='A2');line_two=self.request(second)
+        self.result(line_two,3,tracking='T2',on='2026-10-05')
+        self.assertEqual([row['order_no'] for row in self.s.pending_erp_shipments('2026-10-05')],['O1'])
+        self.assertEqual(len(self.s.pending_erp_shipments()),2)
+
     def test_duplicate_and_changed_orders_are_allowed_in_test_mode(self):
         path,o=self.import_order()
         self.assertEqual(self.s.import_files([path]),(1,0))

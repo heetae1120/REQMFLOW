@@ -30,7 +30,7 @@ from .column_matching import match_columns
 from .shipping import compact, channel_key
 
 
-APP_VERSION = '1.6.6'
+APP_VERSION = '1.6.7'
 
 
 CHANNEL_TO_INTERNAL = {
@@ -220,7 +220,6 @@ class Desktop:
         self.button(actions,'＋ 판매 입력 (자동 판별)',self.import_files,style='Accent.TButton')
         self.button(actions,'선택 상품 매칭',self.mapping)
         self.button(actions,'미매칭 묶음 검토',self.batch_matching_review)
-        self.button(actions,'이벤트 규칙',self.event_rule)
         self.button(actions,'배송정보 수정',self.delivery)
         self.button(actions,'선택 주문 삭제',self.delete_orders)
         self.button(actions,'강제 출고 승인/해제',self.force_shipping_approval)
@@ -242,7 +241,11 @@ class Desktop:
         self.search_suggestion_bar.pack(fill='x',padx=(44,0),pady=(0,4))
         self.detail = tk.StringVar(value='주문을 선택하면 구성품을 확인할 수 있습니다. Ctrl/Shift로 여러 주문을 선택하세요.')
         ttk.Label(self.order_frame,textvariable=self.detail,wraplength=1200,padding=(8,6),foreground='#64748B').pack(fill='x')
-        self.table = self.tree(self.order_frame,['중복/승인','상태','이벤트','판매처','주문번호','원본 상품 / 옵션','변환 출고품목','수량','금액','수령인','확인 사항'],[95,95,110,130,155,290,280,60,90,105,280])
+        self.table = self.tree(
+            self.order_frame,
+            ['주문번호','이름','주소','연락처','상품명','매칭할 상품명'],
+            [155,110,330,135,300,320],
+        )
         self.table.tag_configure('review',foreground='#BE123C',background='#FFF1F2')
         self.table.tag_configure('duplicate',foreground='#854D0E',background='#FEF9C3')
         self.table.tag_configure('forced',foreground='#166534',background='#F0FDF4')
@@ -253,6 +256,17 @@ class Desktop:
         line = ttk.Frame(result_frame); line.pack(anchor='w',pady=10)
         self.button(line,'물류 결과 양식 저장',self.result_template)
         self.button(line,'실제 출고 결과 입력',self.results)
+        ttk.Separator(result_frame).pack(fill='x',pady=18)
+        ttk.Label(result_frame,text='금일 출고 금액 매칭',font=(self.font_family,16,'bold')).pack(anchor='w')
+        ttk.Label(result_frame,text='품목은 주문·출고요청에서 확정하고, 여기서는 실제 출고 건의 이카운트 반영 금액만 확인·수정합니다.',wraplength=1000).pack(anchor='w',pady=(4,8))
+        amount_line = ttk.Frame(result_frame); amount_line.pack(fill='x',pady=(0,8))
+        self.erp_ship_day = tk.StringVar(value=date.today().isoformat())
+        ttk.Label(amount_line,text='실제 출고일').pack(side='left')
+        ttk.Entry(amount_line,textvariable=self.erp_ship_day,width=12).pack(side='left',padx=6)
+        self.button(amount_line,'조회',self.refresh_erp_shipments)
+        self.button(amount_line,'선택 금액 매칭',self.match_erp_amount,style='Accent.TButton')
+        self.erp_shipments = self.tree(result_frame,['실제 출고일','주문번호','이름','ERP 품목코드','ERP 품목명','출고수량','ERP 반영금액'],[110,150,110,150,250,80,120])
+        self.erp_shipments.bind('<Double-1>',lambda _event:self.safe(self.match_erp_amount))
         ttk.Separator(result_frame).pack(fill='x',pady=25)
         ttk.Label(result_frame,text='ERP 파일 생성',font=(self.font_family,16,'bold')).pack(anchor='w')
         self.through = tk.StringVar(value=date.today().isoformat())
@@ -906,7 +920,7 @@ class Desktop:
             duplicate = '강제 승인' if d.get('force_shipping_approved') else (f"중복 {o['duplicate_count']}건" if o['duplicate_count'] > 1 else '')
             source_product=d.get('source_product',d['product']);source_option=d.get('source_option',d['option'])
             converted=' / '.join(f"{c.get('name') or c.get('code')} [{c.get('logistics_code') or c.get('code')}]" for c in o['components'])
-            values=[duplicate,o['state'],d.get('event_name',''),channel,d['order_no'],f"{source_product} / {source_option}",converted,d['quantity'],d['amount'],d['recipient'],o['issue']]
+            values=[d['order_no'],d['recipient'],f"{d.get('postcode','')} {d['address']}".strip(),d['phone'],f"{source_product} / {source_option}",converted]
             selected_filter = self.filter.get()
             if selected_filter == '중복 주문' and o['duplicate_count'] <= 1:
                 continue
@@ -928,6 +942,7 @@ class Desktop:
 
     def refresh(self):
         self.refresh_orders()
+        self.refresh_erp_shipments()
         self.refresh_channel_status()
         counts={state:sum(o['state']==state for o in self.rows.values()) for state in ['검토 필요','출고 준비','출고 요청','부분 출고','출고 완료']}
         stats=self.service.match_statistics(self.rows.values())
@@ -950,7 +965,7 @@ class Desktop:
             duplicate = f"중복 주문 {o['duplicate_count']}건  " if o['duplicate_count'] > 1 else ''
             methods=' / '.join(dict.fromkeys(c.get('match_method','전표 DB / 저장 매칭') for c in o['components']))
             near=' · '.join(f"{FIELD_LABELS.get(field,field)}←{m['header']}" for field,m in o['data'].get('column_matches',{}).items() if m['method']=='근사')
-            self.detail.set(event+duplicate+'상품 연결: '+methods+' · 구성품: '+' / '.join(f"{c['code']} × {c['quantity']} ({c['amount']}원)" for c in o['components'])+' · 근사 열: '+(near or '없음')+'  '+o['issue'])
+            self.detail.set(event+duplicate+'상품 연결: '+methods+' · 구성품: '+' / '.join(f"{c['code']} × {c['quantity']}" for c in o['components'])+' · 근사 열: '+(near or '없음')+'  '+o['issue'])
 
     def open_mapping_from_click(self, event):
         row = self.table.identify_row(event.y)
@@ -1087,8 +1102,8 @@ class Desktop:
         ttk.Label(win,text=f"{d['channel']}  |  {d['product']} / {d['option']}",wraplength=1000,padding=12).pack(anchor='w')
         ttk.Label(win,text='상품에 포함되는 출고 품목을 입력하세요. 첫 줄은 본품입니다.\n최종 출고수량은 모든 품목에 원본 엑셀 수량을 그대로 적용하며 구성 수량을 곱하지 않습니다.',padding=12).pack(anchor='w')
         grid=ttk.Frame(win,padding=12);grid.pack(fill='both',expand=True)
-        fields=['code','logistics_code','name','quantity','unit_amount','warehouse','customer']
-        labels=['ERP 품목코드','물류사 품목코드','품목명','구성 수량(곱셈 안 함)','부속품 단가','창고','거래처코드']
+        fields=['code','logistics_code','name','quantity','warehouse','customer']
+        labels=['ERP 품목코드','물류사 품목코드','품목명','구성 수량(곱셈 안 함)','창고','거래처코드']
         widths=[34,34,34,10,14,10,34]
         for column,label in enumerate(labels):ttk.Label(grid,text=label).grid(row=0,column=column,padx=3,pady=6)
         entries=[]
@@ -1392,6 +1407,29 @@ class Desktop:
         if path:
             new,duplicate=self.service.import_results(path);self.refresh()
             messagebox.showinfo('반영 완료',f'실제 출고 {new}행 · 중복 제외 {duplicate}행')
+
+    def refresh_erp_shipments(self):
+        if not hasattr(self,'erp_shipments'):
+            return
+        self.erp_shipments.delete(*self.erp_shipments.get_children())
+        for shipment in self.service.pending_erp_shipments(self.erp_ship_day.get()):
+            self.erp_shipments.insert('', 'end', iid=shipment['id'], values=[
+                shipment['day'],shipment['order_no'],shipment['recipient'],shipment['code'],shipment['product'],
+                shipment['quantity'],f"{int(Decimal(shipment['amount'])):,}" if shipment['amount'] else '미매칭',
+            ])
+        self.root.after_idle(lambda:autosize_tree(self.erp_shipments,maximum=320))
+
+    def match_erp_amount(self):
+        shipment_id=self.selected(self.erp_shipments)[0]
+        shipment=next(row for row in self.service.pending_erp_shipments() if row['id']==shipment_id)
+        value=simpledialog.askstring(
+            'ERP 금액 매칭',
+            f"주문번호: {shipment['order_no']}\n품목: {shipment['product']}\n출고수량: {shipment['quantity']}\n\n이카운트에 반영할 총금액을 입력하세요.",
+            initialvalue=shipment['amount'],parent=self.root,
+        )
+        if value is None:return
+        self.service.set_erp_amount(shipment_id,value.replace(',',''))
+        self.refresh_erp_shipments()
 
     def erp(self):
         path=self.save_path('ERP_'+self.voucher.get()+'.xlsx')
