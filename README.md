@@ -28,3 +28,5 @@ python tools/build_portable.py
 ```
 
 `config.example.json`을 `config.json`으로 복사한 뒤 필요한 Supabase 공개 설정값을 입력합니다. 실제 비밀번호와 비밀키는 커밋하지 않습니다.
+
+Windows 배포본은 이 저장소의 GitHub Releases를 확인해 새 버전을 자동으로 내려받습니다.

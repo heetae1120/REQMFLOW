@@ -16,7 +16,7 @@ from reqm_local.service import Operations
 from reqm_local.shipping import ShippingCatalog, compact
 from reqm_local.ui_helpers import filter_combobox_choices, search_suggestions
 from reqm_local.workspace_cloud import export_workspace, import_workspace, workspace_digest
-from reqm_local.updater import prepare_update, version_tuple
+from reqm_local.updater import RELEASE_API, prepare_update, version_tuple
 
 REFERENCE=Path(__file__).resolve().parents[1]/'supabase/ecount_migration/data'
 HEADERS=['주문번호','상품주문번호','상품명','옵션정보','수량','최종 상품별 총 주문금액','수취인명','수취인연락처1','우편번호','통합배송지','배송비 묶음번호','배송비 합계','주문상태','결제일']
@@ -112,6 +112,7 @@ class LocalTests(unittest.TestCase):
     def test_updater_compares_semantic_versions(self):
         self.assertGreater(version_tuple('v1.10.0'),version_tuple('1.9.9'))
         self.assertEqual(version_tuple('1.4'),(1,4,0))
+        self.assertEqual(RELEASE_API,'https://api.github.com/repos/heetae1120/REQMFLOW/releases/latest')
 
     def test_updater_verifies_and_extracts_release_package(self):
         import hashlib,zipfile

@@ -12,7 +12,7 @@ import zipfile
 from pathlib import Path
 
 
-RELEASE_API = 'https://api.github.com/repos/junho960809-spec/REQM-FLOW-Releases/releases/latest'
+RELEASE_API = 'https://api.github.com/repos/heetae1120/REQMFLOW/releases/latest'
 PACKAGE_NAME = 'REQM_FLOW_windows.zip'
 CHECKSUM_NAME = PACKAGE_NAME + '.sha256'
 
