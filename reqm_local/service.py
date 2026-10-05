@@ -55,6 +55,15 @@ def encode(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+def warehouse_code(value):
+    text = identifier(value).replace(' ', '')
+    if text.startswith('100'):
+        return '100'
+    if text.startswith('300'):
+        return '300'
+    raise ValueError('출하창고는 100 본사창고 또는 300 위킵창고만 사용할 수 있습니다.')
+
+
 class Operations:
     """All mutations are transactional. No GUI, network, or user session dependencies."""
 
@@ -218,6 +227,7 @@ class Operations:
                     if key == 'customer' and channel:
                         raise ValueError(f'{channel}의 ERP 거래처코드를 입력하세요. 한 번 저장하면 같은 판매처의 다음 매칭에 자동 적용됩니다.')
                     raise ValueError(f'구성품의 {labels[key]}를 입력하세요.')
+            component['warehouse'] = warehouse_code(component['warehouse'])
             component['quantity'] = quantity(source.get('quantity',''))
             component['unit_amount'] = str(number(source.get('unit_amount','0')))
             if number(component['unit_amount']) != number(component['unit_amount']).to_integral_value():
@@ -804,7 +814,7 @@ class Operations:
             for count, unit in ((q-remainder,price),(remainder,price+1)):
                 if count:
                     supply = int((Decimal(unit*count)/Decimal('1.1')).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
-                    rows.append([int(on.replace('-','')),None,c['customer'],None,self.settings['manager_code'],c['warehouse'],None,None,None,None,None,None,c['code'],c['name'],None,count,unit,None,supply,unit*count-supply,None,None])
+                    rows.append([None,None,c['customer'],None,self.settings['manager_code'],int(warehouse_code(c['warehouse'])),None,None,None,None,None,None,c['code'],None,None,count,unit,None,supply,unit*count-supply,None,None])
         with self.db:
             for shipment in pending:
                 order = orders[shipment['order_id']]
@@ -829,6 +839,7 @@ class Operations:
                     base = group[0]['components'][0]
                     append({**base,'code':'택배운송비','name':'배송비'},1,fee)
                 self.db.execute('INSERT INTO fees VALUES(?,?)',(bundle,batch))
+            rows.sort(key=lambda row: (0 if row[5] == 100 else 1))
             headers = ['일자','순번','거래처코드','거래처명','담당자','출하창고','거래유형','통화','환율','계좌번호','미수금','특이사항','품목코드','품목명','규격','수량','단가','외화금액','공급가액','부가세','비고','생산전표생성']
             self._artifact(batch,'ERP',on,workbook_bytes(headers,rows,'이카운트 웹입력'),path)
             self.event('ERP 파일 생성',batch)

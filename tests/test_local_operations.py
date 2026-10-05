@@ -194,6 +194,34 @@ class LocalTests(unittest.TestCase):
         book.close()
         self.assertEqual(total,12345)
 
+    def test_erp_export_matches_ecount_template_columns_and_warehouse_order(self):
+        _,warehouse_300=self.import_order(line='A1',fee=0)
+        self.map(warehouse_300,[dict(code='ITEM-300',logistics_code='W300',name='위킵품목',quantity=1,unit_amount=0,warehouse='300 위킵창고',customer='C300')])
+        self.s.request([warehouse_300['id']],'2026-10-05',self.folder/'request-300.xlsx')
+        line_300=self.s.db.execute('SELECT id FROM request_lines WHERE order_id=?',(warehouse_300['id'],)).fetchone()[0]
+        self.result(line_300,3,tracking='T300',on='2026-10-05')
+        _,warehouse_100=self.import_order(line='A2',fee=0)
+        self.map(warehouse_100,[dict(code='ITEM-100',logistics_code='W100',name='본사품목',quantity=1,unit_amount=0,warehouse='100 본사창고',customer='C100')])
+        self.s.request([warehouse_100['id']],'2026-10-05',self.folder/'request-100.xlsx')
+        line_100=self.s.db.execute('SELECT id FROM request_lines WHERE order_id=?',(warehouse_100['id'],)).fetchone()[0]
+        self.result(line_100,3,tracking='T100',on='2026-10-05')
+        path=self.folder/'ecount-template.xlsx'
+        self.s.export_erp('2026-10-05','2026-10-05',path)
+        book=load_workbook(path,data_only=True);rows=list(book['이카운트 웹입력'].values)[1:];book.close()
+        warehouses=[row[5] for row in rows]
+        self.assertEqual(set(warehouses),{100,300})
+        self.assertEqual(warehouses,sorted(warehouses))
+        allowed={2,4,5,12,15,16,18,19}
+        for row in rows:
+            self.assertEqual({index for index,value in enumerate(row) if value not in (None,'')},allowed)
+            self.assertIsNone(row[0])
+            self.assertIsNone(row[13])
+
+    def test_mapping_rejects_unknown_warehouse(self):
+        _,order=self.import_order()
+        with self.assertRaisesRegex(ValueError,'100 본사창고 또는 300 위킵창고'):
+            self.map(order,[dict(code='ITEM',logistics_code='W',name='품목',quantity=1,unit_amount=0,warehouse='기타창고',customer='C')])
+
     def test_pending_erp_shipments_are_filtered_by_actual_shipping_day(self):
         _,first=self.import_order(line='A1');line_one=self.request(first)
         self.result(line_one,3,tracking='T1',on='2026-10-04')

@@ -30,7 +30,7 @@ from .column_matching import match_columns
 from .shipping import compact, channel_key
 
 
-APP_VERSION = '1.6.8'
+APP_VERSION = '1.6.9'
 
 
 CHANNEL_TO_INTERNAL = {
@@ -1124,7 +1124,7 @@ class Desktop:
         ttk.Label(win,text='상품에 포함되는 출고 품목을 입력하세요. 첫 줄은 본품입니다.\n최종 출고수량은 모든 품목에 원본 엑셀 수량을 그대로 적용하며 구성 수량을 곱하지 않습니다.',padding=12).pack(anchor='w')
         grid=ttk.Frame(win,padding=12);grid.pack(fill='both',expand=True)
         fields=['code','logistics_code','name','quantity','warehouse','customer']
-        labels=['ERP 품목코드','물류사 품목코드','품목명','구성 수량(곱셈 안 함)','창고','거래처코드']
+        labels=['ERP 품목코드','물류사 품목코드','품목명','구성 수량(곱셈 안 함)','출하창고','거래처코드']
         widths=[34,34,34,10,14,34]
         for column,label in enumerate(labels):ttk.Label(grid,text=label).grid(row=0,column=column,padx=3,pady=6)
         entries=[]
@@ -1160,13 +1160,16 @@ class Desktop:
             variables={field:tk.StringVar(value=str(defaults[field])) for field in fields}
             widgets=[]
             for column,field in enumerate(fields):
-                if field in ('code','customer'):
-                    choices=catalog_choices if field=='code' else customer_choices
+                if field in ('code','customer','warehouse'):
+                    choices=catalog_choices if field=='code' else (customer_choices if field=='customer' else ['100 본사창고','300 위킵창고'])
                     widget=ttk.Combobox(grid,textvariable=variables[field],values=choices,width=widths[column])
                     def chosen(_event,variables=variables,field=field):
                         value=_event.widget.get().split(' · ',1)[0]
                         if field=='customer':
                             variables['customer'].set(value)
+                            return
+                        if field=='warehouse':
+                            variables['warehouse'].set(value)
                             return
                         variables['code'].set(value);item=self.service.catalog.items.get(value,{})
                         variables['logistics_code'].set(value)
