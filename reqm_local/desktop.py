@@ -78,6 +78,8 @@ class Desktop:
         self._source_stamp = self.source_stamp()
         self.available_update = None
         self.update_checking = False
+        self.update_error = None
+        self._update_after_id = None
         register_brand_font()
         self.font_family = FONT_FAMILY if FONT_FAMILY in tkfont.families(root) else '맑은 고딕'
         self.app_icon = None
@@ -339,22 +341,36 @@ class Desktop:
                 except Exception:pass
         self.root.after(4000,self.check_for_source_update)
 
-    def check_remote_update(self):
+    def check_remote_update(self, user_initiated=False):
         if self._quitting or self.update_checking or not getattr(sys,'frozen',False):
             return
+        if self._update_after_id:
+            try:self.root.after_cancel(self._update_after_id)
+            except tk.TclError:pass
+            self._update_after_id = None
         self.update_checking = True
+        self.update_error = None
         def worker():
             try:
                 from .updater import latest_release
                 release = latest_release(APP_VERSION)
-                self.root.after(0,lambda:self.remote_update_result(release))
-            except Exception:
-                self.root.after(0,lambda:self.remote_update_result(None))
+                self.root.after(0,lambda:self.remote_update_result(release,None,user_initiated))
+            except Exception as exc:
+                detail = str(exc) or exc.__class__.__name__
+                self.root.after(0,lambda:self.remote_update_result(None,detail,user_initiated))
         threading.Thread(target=worker,daemon=True).start()
 
-    def remote_update_result(self, release):
+    def remote_update_result(self, release, error=None, user_initiated=False):
         self.update_checking = False
         self.available_update = release
+        self.update_error = error
+        if not self._quitting:
+            self._update_after_id = self.root.after(60 * 60 * 1000,self.check_remote_update)
+        if error:
+            self.update_text.set(f'업데이트 확인 재시도 · {APP_VERSION}')
+            if user_initiated:
+                messagebox.showerror('업데이트 확인 실패',f'업데이트 서버를 확인하지 못했습니다.\n\n{error}',parent=self.root)
+            return
         if release:
             self.update_text.set(f"업데이트 {release['version']} 받기")
             if self.tray_icon and not getattr(self,'_remote_update_notified',False):
@@ -371,7 +387,7 @@ class Desktop:
         if getattr(sys,'frozen',False):
             if not self.available_update:
                 self.update_text.set('업데이트 확인 중…')
-                self.check_remote_update()
+                self.check_remote_update(user_initiated=True)
                 return
             version=self.available_update['version']
             if not messagebox.askyesno('업데이트',f'REQM FLOW {version}을 받아 현재 폴더에 적용할까요?\n저장된 주문과 설정은 그대로 유지됩니다.',parent=self.root):
