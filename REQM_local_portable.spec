@@ -1,11 +1,13 @@
 # Build: python tools/build_portable.py
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_submodules
 
 datas=[
     ('supabase/ecount_migration/data','reference_data'),
     ('assets/fonts','assets/fonts'),
     ('assets/branding','assets/branding'),
 ]
+selenium_hiddenimports=collect_submodules('selenium')
 if Path('config.json').exists():
     datas.append(('config.json','.'))
 
@@ -13,7 +15,7 @@ a = Analysis(
     ['reqm_local_app.py'],
     pathex=[],
     datas=datas,
-    hiddenimports=['xlrd','pystray._win32','supabase','selenium'],
+    hiddenimports=['xlrd','pystray._win32','supabase',*selenium_hiddenimports],
     binaries=[],
     excludes=['PySide6','numpy','pandas','matplotlib','scipy','IPython','pytest'],
 )

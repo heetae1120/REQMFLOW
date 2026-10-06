@@ -31,7 +31,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.8.0'
+APP_VERSION = '1.8.1'
 
 
 CHANNEL_TO_INTERNAL = {

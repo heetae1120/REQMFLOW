@@ -10,8 +10,10 @@ from .desktop import Desktop
 
 def run(folder):
     from supabase import create_client
+    from selenium.webdriver.edge.options import Options as EdgeOptions
     import pystray
     assert callable(create_client)
+    assert EdgeOptions
     assert pystray.Icon
     folder=Path(folder);folder.mkdir(parents=True,exist_ok=True)
     base=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parent.parent))
