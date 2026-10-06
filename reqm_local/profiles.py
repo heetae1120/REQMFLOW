@@ -9,17 +9,21 @@ SALES_CHANNELS = [
 ]
 
 SMARTSTORE_ERP_MAPPING = '스마트스토어 ERP매칭'
-MATCHING_CHANNELS = [SALES_CHANNELS[0], SMARTSTORE_ERP_MAPPING, *SALES_CHANNELS[1:]]
+SMARTSTORE_PURCHASE_MAPPING = '스마트스토어 ERP매칭(구매확정파일)'
+SMARTSTORE_PURCHASE_CHANNEL = '리큐엠_스마트스토어_ERP_구매확정'
+MATCHING_CHANNELS = [
+    SALES_CHANNELS[0], SMARTSTORE_ERP_MAPPING, SMARTSTORE_PURCHASE_MAPPING, *SALES_CHANNELS[1:],
+]
 
 
 def profile(name, hints, columns=None, *, required=None, password='tkdtkd8911!@@', enabled=True,
             excludes=None, content_rule=None, combine=None, sum_columns=None, amount_is_unit=False,
-            purpose='order'):
+            purpose='order', channel=None):
     columns = columns or {}
     required = required or []
     return {
         'preset_version': 1, 'name': name,
-        'channel': '리큐엠_스마트스토어' if name == '스마트스토어' else name,
+        'channel': channel or ('리큐엠_스마트스토어' if name == '스마트스토어' else name),
         'account': '기본', 'filename_hints': hints, 'required': required,
         'columns': columns, 'password': password, 'enabled': enabled,
         'excludes': excludes or [], 'content_rule': content_rule,
@@ -42,6 +46,12 @@ PROFILE_PRESETS = [
         'quantity':['수량'],'amount':['최종 상품별 총 주문금액','결제금액','금액'],
         'paid_at':['결제일','주문일자'],
     },required=[],password='1234',enabled=False,purpose='smartstore_erp'),
+    profile(SMARTSTORE_PURCHASE_MAPPING,['스마트스토어_구매확정','구매확정내역','구매확정'],{
+        'order_no':['주문번호'],'line_no':['상품주문번호'],'product':['상품명'],'option':['옵션정보','옵션'],
+        'quantity':['수량'],'amount':['구매확정금액','정산예정금액','최종 상품별 총 주문금액','결제금액','금액'],
+        'paid_at':['구매확정일','구매확정일시','결제일','주문일자'],
+    },required=[],password='1234',enabled=False,purpose='smartstore_purchase_erp',
+            channel=SMARTSTORE_PURCHASE_CHANNEL),
     profile('지그재그',['order_item_list-PRE_SHIPMENT','지그재그'],{
         'order_no':['주문번호'],'line_no':['상품주문번호'],'source_item_code':['상품코드'],'product':['상품명'],
         'option':['옵션정보'],'quantity':['수량'],'amount':['상품주문액 (원)'],'shipping':['총 배송비 (원)'],
@@ -165,6 +175,7 @@ PROFILE_PRESETS = [
 PRESET_COLUMN_INDEXES = {
     '스마트스토어': {'order_no':1,'line_no':0,'product':16,'option':20,'quantity':21,'amount':27,'recipient':13,'phone':48,'postcode':52,'address':50,'paid_at':29,'status':3,'bundle':42,'shipping':45},
     SMARTSTORE_ERP_MAPPING: {},
+    SMARTSTORE_PURCHASE_MAPPING: {},
     '지그재그': {'order_no':2,'line_no':1,'source_item_code':16,'product':18,'option':22,'quantity':26,
               'amount':27,'shipping':32,'recipient':35,'phone':36,'postcode':38,'address':37,
               'memo':40,'paid_at':3,'status':4,'bundle':2},

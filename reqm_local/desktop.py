@@ -27,18 +27,22 @@ from .ui_helpers import (
     post_combobox, search_suggestions,
 )
 from .workspace_cloud import CloudWorkspace, WorkspaceConflict
-from .profiles import PROFILE_PRESETS, SALES_CHANNELS, MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING
+from .profiles import (
+    PROFILE_PRESETS, SALES_CHANNELS, MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING,
+    SMARTSTORE_PURCHASE_MAPPING, SMARTSTORE_PURCHASE_CHANNEL,
+)
 from .column_matching import match_columns
 from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.4'
+APP_VERSION = '1.9.5'
 
 
 CHANNEL_TO_INTERNAL = {
     '스마트스토어': '리큐엠_스마트스토어',
     SMARTSTORE_ERP_MAPPING: '리큐엠_스마트스토어_ERP',
+    SMARTSTORE_PURCHASE_MAPPING: SMARTSTORE_PURCHASE_CHANNEL,
 }
 INTERNAL_TO_CHANNEL = {value: key for key, value in CHANNEL_TO_INTERNAL.items()}
 
@@ -189,6 +193,10 @@ class Desktop:
         tabs = ttk.Notebook(content,style='Flow.TNotebook')
         tabs.pack(fill='both',expand=True)
         self.today = tk.StringVar(value=date.today().isoformat())
+        self.request_excluded_channels=set(service.settings.get('request_excluded_channels',[]))
+        self.erp_excluded_channels=set(service.settings.get('erp_excluded_channels',[]))
+        self.request_exclusion_text=tk.StringVar(value=self.exclusion_label(self.request_excluded_channels))
+        self.erp_exclusion_text=tk.StringVar(value=self.exclusion_label(self.erp_excluded_channels))
         matching_frame = ttk.Frame(tabs,padding=18)
         self.order_frame = ttk.Frame(tabs,padding=12)
         result_frame = ttk.Frame(tabs,padding=16)
@@ -255,6 +263,7 @@ class Desktop:
         release.pack(side='left',fill='x',padx=(6,0))
         ttk.Label(release,text='요청일').pack(side='left',padx=(0,4))
         ttk.Entry(release,textvariable=self.today,width=11).pack(side='left')
+        ttk.Button(release,textvariable=self.request_exclusion_text,command=lambda:self.safe(lambda:self.choose_channel_exclusions('request'))).pack(side='left',padx=4)
         self.button(release,'사전검사',self.preflight_review,style='Quiet.TButton')
         self.button(release,'선택 주문 파일 생성',self.request,style='Accent.TButton')
         self.search = tk.StringVar()
@@ -306,8 +315,10 @@ class Desktop:
         result_actions = ttk.Frame(result_card);result_actions.grid(row=0,column=1,rowspan=3,sticky='e',padx=(40,0))
         self.button(result_actions,'위킵 출고양식 저장',self.result_template,style='Quiet.TButton')
         self.button(result_actions,'당일 출고건 자동 불러오기',self.auto_results,style='Accent.TButton')
+        ttk.Button(result_actions,textvariable=self.erp_exclusion_text,command=lambda:self.safe(lambda:self.choose_channel_exclusions('erp'))).pack(side='left',padx=4)
         self.button(result_actions,'일반 실제출고 입력',self.results,style='Accent.TButton')
-        self.button(result_actions,'스마트스토어 ERP 입력',self.smartstore_erp_results,style='Accent.TButton')
+        self.button(result_actions,'스마트스토어 출고파일',self.smartstore_erp_results,style='Accent.TButton')
+        self.button(result_actions,'구매확정파일 입력',self.smartstore_purchase_results,style='Accent.TButton')
         result_card.columnconfigure(0,weight=1)
         confirmed_line=ttk.Frame(result_input);confirmed_line.pack(fill='x',pady=(12,8))
         ttk.Label(confirmed_line,text='출고일').pack(side='left')
@@ -367,6 +378,7 @@ class Desktop:
         ttk.Label(line,text='ERP 전표일').pack(side='left',padx=(14,6))
         self.date_picker(line,self.voucher,'ERP 전표일').pack(side='left')
         ttk.Checkbutton(line,text='ESM 포함',variable=self.erp_include_esm).pack(side='left',padx=(14,4))
+        ttk.Button(line,textvariable=self.erp_exclusion_text,command=lambda:self.safe(lambda:self.choose_channel_exclusions('erp'))).pack(side='left',padx=4)
         self.button(line,'ERP 파일 생성',self.erp,style='Accent.TButton')
         ttk.Label(erp_card,text='이미 생성한 출고는 제외됩니다. 배송비는 묶음 전체 출고 완료 후 한 번 반영하며, 부가세 포함·10% 과세 기준입니다.',foreground='#64748B',wraplength=1000).pack(anchor='w',pady=(16,0))
         self.history_day=tk.StringVar(value=date.today().isoformat())
@@ -404,6 +416,52 @@ class Desktop:
         self.root.after(4000,self.check_for_source_update)
         if getattr(sys,'frozen',False):
             self.root.after(1800,self.check_remote_update)
+
+    @staticmethod
+    def exclusion_label(channels):
+        return '판매처 제외 없음' if not channels else f'판매처 제외 {len(channels):,}개'
+
+    def choose_channel_exclusions(self, scope):
+        if scope not in ('request','erp'):
+            raise ValueError('판매처 제외 범위를 확인하세요.')
+        current=set(self.request_excluded_channels if scope=='request' else self.erp_excluded_channels)
+        choices=list(SALES_CHANNELS)
+        if scope=='erp':
+            choices.extend(channel for channel in ('옥션','지마켓') if channel not in choices)
+        win=tk.Toplevel(self.root)
+        win.title('출고요청 판매처 제외' if scope=='request' else '실제출고 ERP 판매처 제외')
+        win.geometry('650x500');win.transient(self.root);win.grab_set()
+        ttk.Label(win,text='파일에서 제외할 판매처 선택',font=(self.font_family,16,'bold'),padding=(18,16)).pack(anchor='w')
+        ttk.Label(
+            win,
+            text='체크한 판매처는 이번 이후 출력에서 빠지며, 체크를 해제하면 다시 포함됩니다.',
+            foreground='#64748B',padding=(18,0),
+        ).pack(anchor='w')
+        body=ttk.Frame(win,padding=18);body.pack(fill='both',expand=True)
+        variables={channel:tk.BooleanVar(value=channel in current) for channel in choices}
+        for index,channel in enumerate(choices):
+            ttk.Checkbutton(body,text=channel,variable=variables[channel]).grid(
+                row=index//3,column=index%3,sticky='w',padx=(0,28),pady=7,
+            )
+        for column in range(3):body.columnconfigure(column,weight=1)
+        def clear():
+            for variable in variables.values():variable.set(False)
+        def save():
+            selected={channel for channel,variable in variables.items() if variable.get()}
+            key='request_excluded_channels' if scope=='request' else 'erp_excluded_channels'
+            self.service.settings[key]=sorted(selected)
+            self.service._write_settings()
+            if scope=='request':
+                self.request_excluded_channels=selected
+                self.request_exclusion_text.set(self.exclusion_label(selected))
+            else:
+                self.erp_excluded_channels=selected
+                self.erp_exclusion_text.set(self.exclusion_label(selected))
+            win.destroy()
+        actions=ttk.Frame(win,padding=14);actions.pack(fill='x')
+        self.button(actions,'전체 포함',clear,style='Quiet.TButton')
+        self.button(actions,'취소',win.destroy,style='Quiet.TButton')
+        self.button(actions,'제외 설정 저장',save,style='Accent.TButton')
 
     def date_picker(self, parent, variable, title='날짜 선택'):
         holder=ttk.Frame(parent)
@@ -1227,7 +1285,11 @@ class Desktop:
             self.safe(self.mapping)
 
     def select_ready(self):
-        self.table.selection_set([key for key in self.table.get_children() if self.rows[key]['state']=='출고 준비'])
+        self.table.selection_set([
+            key for key in self.table.get_children()
+            if self.rows[key]['state']=='출고 준비'
+            and INTERNAL_TO_CHANNEL.get(self.rows[key]['data']['channel'],self.rows[key]['data']['channel']) not in self.request_excluded_channels
+        ])
 
     def force_shipping_approval(self):
         ids=list(self.selected(self.table))
@@ -1646,13 +1708,20 @@ class Desktop:
         return result['approved']
 
     def request(self):
-        ids=self.selected(self.table)
+        selected=list(self.selected(self.table))
+        ids=[key for key in selected if INTERNAL_TO_CHANNEL.get(
+            self.rows[key]['data']['channel'],self.rows[key]['data']['channel']
+        ) not in self.request_excluded_channels]
+        if not ids:
+            raise ValueError('선택한 주문이 모두 제외 판매처에 포함되어 있습니다.')
         if not self.preflight_review(ids,show_success=False):return
         if not self.confirm_request_review(ids):return
         path=self.save_path('출고요청_'+self.today.get()+'.xlsx')
         if path:
-            batch=self.service.request(ids,self.today.get(),path); self.refresh()
-            messagebox.showinfo('파일 생성',f'{batch}\n출고요청 파일을 저장했습니다. 물류사 양식을 확인한 뒤 전달하세요.')
+            batch=self.service.request(ids,self.today.get(),path,excluded_channels=self.request_excluded_channels); self.refresh()
+            excluded=len(selected)-len(ids)
+            suffix=f'\n제외 판매처 주문 {excluded:,}건은 포함하지 않았습니다.' if excluded else ''
+            messagebox.showinfo('파일 생성',f'{batch}\n출고요청 파일을 저장했습니다. 물류사 양식을 확인한 뒤 전달하세요.{suffix}')
 
     def result_template(self):
         path=self.save_path('위킵_출고결과_양식.xlsx')
@@ -1660,10 +1729,11 @@ class Desktop:
 
     def auto_results(self):
         selected_day=self.erp_ship_day.get()
-        new,duplicate=self.service.auto_import_shipments(selected_day);self.refresh()
+        new,duplicate=self.service.auto_import_shipments(selected_day,self.erp_excluded_channels);self.refresh()
+        excluded=', '.join(sorted(self.erp_excluded_channels)) or '없음'
         messagebox.showinfo(
             '자동 반영 완료',
-            f'{selected_day} 출고요청 기준\n실제 출고 {new}행 · 기존 반영 {duplicate}행\n스마트스토어는 자동으로 제외했습니다.',
+            f'{selected_day} 출고요청 기준\n실제 출고 {new}행 · 기존 반영 {duplicate}행\n스마트스토어는 자동으로 제외했습니다.\n선택 제외: {excluded}',
             parent=self.root,
         )
 
@@ -1675,12 +1745,21 @@ class Desktop:
 
     def smartstore_erp_results(self):
         path=filedialog.askopenfilename(
-            parent=self.root,title='스마트스토어 ERP 입력 원본 선택',
-            filetypes=[('스마트스토어 ERP 파일','*.xlsx *.xlsm *.xls *.csv')],
+            parent=self.root,title='스마트스토어 출고파일 선택',
+            filetypes=[('스마트스토어 출고파일','*.xlsx *.xlsm *.xls *.csv')],
         )
         if path:
             new,duplicate=self.service.import_smartstore_erp(path,self.erp_ship_day.get());self.refresh()
-            messagebox.showinfo('반영 완료',f'스마트스토어 ERP {new}행 · 중복 제외 {duplicate}행')
+            messagebox.showinfo('반영 완료',f'스마트스토어 출고파일 {new}행 · 중복 제외 {duplicate}행')
+
+    def smartstore_purchase_results(self):
+        path=filedialog.askopenfilename(
+            parent=self.root,title='스마트스토어 구매확정파일 선택',
+            filetypes=[('스마트스토어 구매확정파일','*.xlsx *.xlsm *.xls *.csv')],
+        )
+        if path:
+            new,duplicate=self.service.import_smartstore_purchase(path,self.erp_ship_day.get());self.refresh()
+            messagebox.showinfo('반영 완료',f'스마트스토어 구매확정 {new}행 · 중복 제외 {duplicate}행')
 
     def save_esm_login(self):
         save_credentials(
@@ -1902,6 +1981,7 @@ class Desktop:
             self.service.export_erp(
                 self.voucher.get(),self.through.get(),path,
                 from_day=self.erp_from.get(),include_esm=self.erp_include_esm.get(),
+                excluded_channels=self.erp_excluded_channels,
             );self.refresh()
             messagebox.showinfo('ERP 파일 생성','ERP 파일을 저장했습니다. 사이트 등록 후 출력 이력에서 등록 확인을 표시하세요.')
 

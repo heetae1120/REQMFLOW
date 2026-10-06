@@ -21,6 +21,7 @@ from .files import (
     REQUEST_COLUMNS, WEKEEP_REQUEST_COLUMNS, settings_at,
 )
 from .esm import parse_esm_rows
+from .profiles import SMARTSTORE_PURCHASE_CHANNEL
 
 
 SMARTSTORE_CHANNEL = '리큐엠_스마트스토어'
@@ -28,7 +29,21 @@ SMARTSTORE_ERP_CHANNEL = '리큐엠_스마트스토어_ERP'
 
 
 def is_smartstore_channel(value):
-    return identifier(value).replace(' ', '') in ('스마트스토어', SMARTSTORE_CHANNEL, SMARTSTORE_ERP_CHANNEL)
+    return identifier(value).replace(' ', '') in (
+        '스마트스토어', SMARTSTORE_CHANNEL, SMARTSTORE_ERP_CHANNEL, SMARTSTORE_PURCHASE_CHANNEL,
+    )
+
+
+def display_channel(value):
+    text=identifier(value).replace(' ', '')
+    if is_smartstore_channel(text):
+        return '스마트스토어'
+    return identifier(value).removeprefix('리큐엠_')
+
+
+def is_excluded_channel(value, excluded_channels=None):
+    excluded={identifier(item).replace(' ', '').removeprefix('리큐엠_') for item in (excluded_channels or [])}
+    return display_channel(value).replace(' ', '') in excluded
 
 
 def number(value, positive=False):
@@ -108,6 +123,8 @@ class Operations:
         CREATE TABLE IF NOT EXISTS smartstore_erp_rows(id TEXT PRIMARY KEY, identity TEXT UNIQUE NOT NULL,
             day TEXT NOT NULL, data TEXT NOT NULL, components TEXT NOT NULL DEFAULT '[]',
             erp_id TEXT, issue TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS smartstore_purchase_rows(id TEXT PRIMARY KEY, identity TEXT UNIQUE NOT NULL,
+            day TEXT NOT NULL, data TEXT NOT NULL, smartstore_erp_id TEXT);
         CREATE TABLE IF NOT EXISTS esm_erp_rows(id TEXT PRIMARY KEY, identity TEXT UNIQUE NOT NULL,
             day TEXT NOT NULL, data TEXT NOT NULL, components TEXT NOT NULL DEFAULT '[]',
             erp_id TEXT, issue TEXT NOT NULL DEFAULT '');
@@ -697,10 +714,15 @@ class Operations:
             if os.path.exists(temporary):
                 os.unlink(temporary)
 
-    def request(self, ids, on, path):
+    def request(self, ids, on, path, excluded_channels=None):
         on = day(on)
-        orders = [o for o in self.orders() if o['id'] in ids]
-        if not orders or len(orders) != len(set(ids)) or any(o['state'] != '출고 준비' and not o['data'].get('force_shipping_approved') for o in orders):
+        selected = [o for o in self.orders() if o['id'] in ids]
+        if not selected or len(selected) != len(set(ids)):
+            raise ValueError('선택한 주문을 다시 확인하세요.')
+        orders = [o for o in selected if not is_excluded_channel(o['data'].get('channel'),excluded_channels)]
+        if not orders:
+            raise ValueError('선택한 주문이 모두 제외 판매처에 포함되어 있습니다.')
+        if any(o['state'] != '출고 준비' and not o['data'].get('force_shipping_approved') for o in orders):
             raise ValueError('출고 준비 또는 작업자가 강제 출고 승인한 주문만 선택하세요.')
         for order in orders:
             source_quantity = quantity(order['data']['quantity'])
@@ -768,24 +790,29 @@ class Operations:
         self.db.execute('UPDATE orders SET state=? WHERE id=?', ('출고 완료' if totals == shipped else '부분 출고',line['order_id']))
         return 'added'
 
-    def auto_import_shipments(self, on):
+    def auto_import_shipments(self, on, excluded_channels=None):
         """Confirm unprocessed non-SmartStore request lines created on the selected day."""
         shipped_on = day(on)
         rows = self.db.execute('''SELECT r.* FROM request_lines r
             JOIN requests q ON q.id=r.request_id
             WHERE q.day=? ORDER BY r.rowid''', (shipped_on,)).fetchall()
-        added = duplicates = smartstore_skipped = 0
+        added = duplicates = smartstore_skipped = excluded_skipped = 0
         with self.db:
             for line in rows:
                 if self.db.execute('SELECT 1 FROM shipments WHERE line_id=? LIMIT 1', (line['id'],)).fetchone():
                     duplicates += 1
+                    continue
+                order_row=self.db.execute('SELECT data FROM orders WHERE id=?',(line['order_id'],)).fetchone()
+                order_data=json.loads(order_row['data']) if order_row else {}
+                if is_excluded_channel(order_data.get('channel'),excluded_channels):
+                    excluded_skipped += 1
                     continue
                 result = self._record_shipment(line,shipped_on,line['qty'],'')
                 if result == 'added':
                     added += 1
                 elif result == 'smartstore':
                     smartstore_skipped += 1
-            self.event('당일 출고건 자동 반영',f'신규 {added}, 기존 {duplicates}, 스마트스토어 제외 {smartstore_skipped}, 출고일 {shipped_on}')
+            self.event('당일 출고건 자동 반영',f'신규 {added}, 기존 {duplicates}, 스마트스토어 제외 {smartstore_skipped}, 선택 제외 {excluded_skipped}, 출고일 {shipped_on}')
         return added, duplicates
 
     def _wekeep_result_line(self, values, headers, shipped_on):
@@ -859,13 +886,20 @@ class Operations:
             self.event('물류 결과 반영', f'신규 {added}, 중복 {duplicates}, 스마트스토어 제외 {smartstore_skipped}')
         return added, duplicates
 
-    def _smartstore_erp_profile(self):
+    def _smartstore_erp_profile(self, purpose='smartstore_erp'):
         return next((profile for profile in self.settings.get('profiles', [])
-                     if profile.get('purpose') == 'smartstore_erp' or profile.get('channel') == SMARTSTORE_ERP_CHANNEL), None)
+                     if profile.get('purpose') == purpose or (
+                         purpose == 'smartstore_erp' and profile.get('channel') == SMARTSTORE_ERP_CHANNEL
+                     )), None)
 
     def smartstore_erp_enabled(self):
-        profile=self._smartstore_erp_profile()
-        return bool(profile and profile.get('enabled') and profile.get('columns'))
+        return any(
+            profile and profile.get('enabled') and profile.get('columns')
+            for profile in (
+                self._smartstore_erp_profile('smartstore_erp'),
+                self._smartstore_erp_profile('smartstore_purchase_erp'),
+            )
+        )
 
     @staticmethod
     def _reprice_components(components, total, source_quantity):
@@ -905,8 +939,27 @@ class Operations:
             return components, issue
         return [], '스마트스토어 주문 또는 저장된 상품·세트 매칭을 찾지 못했습니다.'
 
+    @staticmethod
+    def _smartstore_rows_match(left, right):
+        if left.get('line_no') and right.get('line_no'):
+            return left.get('line_no') == right.get('line_no')
+        return (
+            left.get('order_no') == right.get('order_no')
+            and left.get('product') == right.get('product')
+            and left.get('option','') == right.get('option','')
+        )
+
+    def _find_smartstore_erp_row(self, data, *, pending_only=False):
+        query='SELECT * FROM smartstore_erp_rows'
+        if pending_only:
+            query += ' WHERE erp_id IS NULL'
+        for row in self.db.execute(query+' ORDER BY rowid'):
+            if self._smartstore_rows_match(json.loads(row['data']),data):
+                return row
+        return None
+
     def import_smartstore_erp(self, path, on):
-        profile = self._smartstore_erp_profile()
+        profile = self._smartstore_erp_profile('smartstore_erp')
         if not profile or not profile.get('enabled'):
             raise ValueError('매칭 설정에서 스마트스토어 ERP매칭 파일과 열을 먼저 저장하세요.')
         shipped_on = day(on)
@@ -927,12 +980,96 @@ class Operations:
                 if self.db.execute('SELECT 1 FROM smartstore_erp_rows WHERE identity=?',(identity,)).fetchone():
                     duplicates += 1
                     continue
+                if any(
+                    json.loads(row['data']).get('_shipping_import_identity') == identity
+                    for row in self.db.execute('SELECT data FROM smartstore_erp_rows')
+                ):
+                    duplicates += 1
+                    continue
+                purchase_target=self._find_smartstore_erp_row(data,pending_only=True)
+                previous=json.loads(purchase_target['data']) if purchase_target else {}
+                if purchase_target and previous.get('_purchase_only'):
+                    if previous.get('_shipping_import_identity') == identity:
+                        duplicates += 1
+                        continue
+                    confirmed=bool(previous.get('_purchase_confirmed'))
+                    merged={**data,**({
+                        key:previous.get(key) for key in ('amount','quantity','paid_at') if previous.get(key) not in (None,'')
+                    } if confirmed else {})}
+                    merged['_purchase_confirmed']=confirmed
+                    merged['_purchase_only']=False
+                    merged['_shipping_import_identity']=identity
+                    old_components=json.loads(purchase_target['components'])
+                    if old_components:
+                        components=self._reprice_components(old_components,merged['amount'],quantity(merged['quantity']))
+                        issue=''
+                    else:
+                        components,issue=self._smartstore_erp_components(merged)
+                    self.db.execute('UPDATE smartstore_erp_rows SET data=?,components=?,issue=? WHERE id=?',(
+                        encode(merged),encode(components),issue,purchase_target['id'],
+                    ))
+                    added += 1
+                    continue
+                data['_shipping_import_identity']=identity
+                data['_purchase_confirmed']=False
+                data['_purchase_only']=False
                 components, issue = self._smartstore_erp_components(data)
                 self.db.execute('INSERT INTO smartstore_erp_rows VALUES(?,?,?,?,?,?,?)',
                     (uuid.uuid4().hex,identity,shipped_on,encode(data),encode(components),None,issue))
                 added += 1
             self.event('스마트스토어 ERP 원본 반영',f'신규 {added}, 중복 {duplicates}, 출고일 {shipped_on}')
         return added, duplicates
+
+    def import_smartstore_purchase(self, path, on):
+        profile=self._smartstore_erp_profile('smartstore_purchase_erp')
+        if not profile or not profile.get('enabled'):
+            raise ValueError('매칭 설정에서 스마트스토어 ERP매칭(구매확정파일)의 파일과 열을 먼저 저장하세요.')
+        confirmed_on=day(on)
+        incoming=parse_orders(path,[profile],channel_override=SMARTSTORE_PURCHASE_CHANNEL)
+        added=duplicates=0
+        with self.db:
+            for data in incoming:
+                data['channel']=SMARTSTORE_CHANNEL
+                data['account']=data.get('account') or '기본'
+                data['quantity']=str(quantity(data.get('quantity') or '1'))
+                data['amount']=str(money(data.get('amount') or '0'))
+                data['shipping']=str(money(data.get('shipping') or '0'))
+                token=encode([
+                    data.get('order_no'),data.get('line_no'),data.get('product'),data.get('option'),
+                    data.get('quantity'),data.get('amount'),data.get('paid_at'),
+                ])
+                identity=hashlib.sha256(token.encode('utf-8')).hexdigest()
+                if self.db.execute('SELECT 1 FROM smartstore_purchase_rows WHERE identity=?',(identity,)).fetchone():
+                    duplicates += 1
+                    continue
+                target=self._find_smartstore_erp_row(data,pending_only=True)
+                if target:
+                    previous=json.loads(target['data'])
+                    merged={**previous,**data,'_purchase_confirmed':True,'_purchase_only':False}
+                    old_components=json.loads(target['components'])
+                    if old_components:
+                        components=self._reprice_components(old_components,merged['amount'],quantity(merged['quantity']))
+                        issue=''
+                    else:
+                        components,issue=self._smartstore_erp_components(merged)
+                    row_id=target['id']
+                    self.db.execute('UPDATE smartstore_erp_rows SET data=?,components=?,issue=? WHERE id=?',(
+                        encode(merged),encode(components),issue,row_id,
+                    ))
+                else:
+                    data.update(_purchase_confirmed=True,_purchase_only=True)
+                    components,issue=self._smartstore_erp_components(data)
+                    row_id=uuid.uuid4().hex
+                    row_identity=hashlib.sha256(('purchase:'+identity).encode('utf-8')).hexdigest()
+                    self.db.execute('INSERT INTO smartstore_erp_rows VALUES(?,?,?,?,?,?,?)',(
+                        row_id,row_identity,confirmed_on,encode(data),encode(components),None,issue,
+                    ))
+                self.db.execute('INSERT INTO smartstore_purchase_rows VALUES(?,?,?,?,?)',(
+                    uuid.uuid4().hex,identity,confirmed_on,encode(data),row_id,
+                ))
+                added += 1
+            self.event('스마트스토어 구매확정 원본 반영',f'신규 {added}, 중복 {duplicates}, 기준일 {confirmed_on}')
+        return added,duplicates
 
     def _erp_source_components(self, data):
         custom = self.db.execute('SELECT components FROM mappings WHERE key=?', (self.mapping_key(data),)).fetchone()
@@ -1163,7 +1300,8 @@ class Operations:
             self.settings.setdefault('channel_customer_codes',{})[channel] = customer
             self._write_settings()
 
-    def export_erp(self, on, through, path, from_day=None, include_esm=True, only_esm=False):
+    def export_erp(self, on, through, path, from_day=None, include_esm=True, only_esm=False,
+                   excluded_channels=None):
         on, through = day(on), day(through)
         from_day = day(from_day) if from_day else '0001-01-01'
         if from_day > through:
@@ -1174,12 +1312,20 @@ class Operations:
             WHERE s.erp_id IS NULL AND s.day>=? AND s.day<=? ORDER BY s.day,s.rowid''',
             (from_day,through)).fetchall()
         orders = {o['id']:o for o in self.orders()}
+        pending = [shipment for shipment in pending if not is_excluded_channel(
+            orders[shipment['order_id']]['data'].get('channel'),excluded_channels
+        )]
         if self.smartstore_erp_enabled():
             pending = [shipment for shipment in pending if not is_smartstore_channel(orders[shipment['order_id']]['data'].get('channel'))]
         smart_rows=self.db.execute('''SELECT * FROM smartstore_erp_rows
             WHERE erp_id IS NULL AND day>=? AND day<=? ORDER BY day,rowid''',(from_day,through)).fetchall()
         esm_rows=self.db.execute('''SELECT * FROM esm_erp_rows
             WHERE erp_id IS NULL AND day>=? AND day<=? ORDER BY day,rowid''',(from_day,through)).fetchall()
+        if is_excluded_channel('스마트스토어',excluded_channels):
+            smart_rows=[]
+        esm_rows=[row for row in esm_rows if not is_excluded_channel(
+            json.loads(row['data']).get('channel'),excluded_channels
+        )]
         if only_esm:
             pending,smart_rows=[],[]
         elif not include_esm:
@@ -1230,6 +1376,8 @@ class Operations:
             included_bundles={self.bundle_key(orders[order_id]['data']) for order_id in included_order_ids}
             groups = {}
             for order in orders.values():
+                if is_excluded_channel(order['data'].get('channel'),excluded_channels):
+                    continue
                 bundle=self.bundle_key(order['data'])
                 if bundle in included_bundles:
                     groups.setdefault(bundle,[]).append(order)

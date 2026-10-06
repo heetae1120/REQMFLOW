@@ -22,7 +22,9 @@ from reqm_local.updater import RELEASE_API, prepare_update, version_tuple
 from reqm_local.desktop import (
     FIELD_LABELS, MAPPING_FIELD_ORDER, calendar_month_days, matching_header_row_number,
 )
-from reqm_local.profiles import MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING
+from reqm_local.profiles import (
+    MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING, SMARTSTORE_PURCHASE_MAPPING,
+)
 from reqm_local.esm import ESM_DELIVERY_STATUSES, parse_esm_rows
 
 REFERENCE=Path(__file__).resolve().parents[1]/'supabase/ecount_migration/data'
@@ -440,7 +442,113 @@ class LocalTests(unittest.TestCase):
         ])
 
     def test_smartstore_erp_mapping_is_directly_below_smartstore(self):
-        self.assertEqual(MATCHING_CHANNELS[:3],['스마트스토어',SMARTSTORE_ERP_MAPPING,'쌤몰'])
+        self.assertEqual(MATCHING_CHANNELS[:4],[
+            '스마트스토어',SMARTSTORE_ERP_MAPPING,SMARTSTORE_PURCHASE_MAPPING,'쌤몰',
+        ])
+
+    def test_request_can_exclude_selected_marketplaces(self):
+        _,included=self.import_order(line='INCLUDED',channel='오늘의집')
+        _,excluded=self.import_order(line='EXCLUDED',channel='지그재그')
+        self.map(included);self.map(excluded)
+        target=self.folder/'marketplace-filtered-request.xlsx'
+        self.s.request(
+            [included['id'],excluded['id']],'2026-10-06',target,
+            excluded_channels={'지그재그'},
+        )
+        book=load_workbook(target,data_only=True);rows=list(book['택배출고'].values)[1:];book.close()
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0][1],'오늘의집')
+        states={row['data']['line_no']:row['state'] for row in self.s.orders()}
+        self.assertEqual(states,{'INCLUDED':'출고 요청','EXCLUDED':'출고 준비'})
+
+    def test_actual_shipment_and_erp_export_can_exclude_marketplaces(self):
+        _,included=self.import_order(line='ERP-IN',amount=12000,fee=0,bundle='ERP-IN',channel='오늘의집')
+        _,excluded=self.import_order(line='ERP-OUT',amount=24000,fee=0,bundle='ERP-OUT',channel='지그재그')
+        included_line=self.request(included);excluded_line=self.request(excluded)
+        self.assertEqual(self.s.auto_import_shipments('2026-10-01',{'지그재그'}),(1,0))
+        shipment_lines=[row['line_id'] for row in self.s.db.execute('SELECT line_id FROM shipments')]
+        self.assertEqual(shipment_lines,[included_line])
+        self.assertNotEqual(included_line,excluded_line)
+
+        # Direct file input remains available; ERP output still obeys the exclusion.
+        self.result(excluded_line,3,'EXCLUDED-TRACK','2026-10-01')
+        target=self.folder/'marketplace-filtered-erp.xlsx'
+        self.s.export_erp(
+            '2026-10-01','2026-10-01',target,
+            excluded_channels={'지그재그'},
+        )
+        exported=self.s.db.execute('SELECT line_id,erp_id FROM shipments ORDER BY rowid').fetchall()
+        self.assertIsNotNone(next(row['erp_id'] for row in exported if row['line_id']==included_line))
+        self.assertIsNone(next(row['erp_id'] for row in exported if row['line_id']==excluded_line))
+
+    def test_smartstore_purchase_file_updates_shipping_row_without_duplicate(self):
+        _,order=self.import_order(q=2,amount=20000,channel='리큐엠_스마트스토어')
+        self.map(order)
+        shipping_profile=next(profile for profile in self.s.settings['profiles'] if profile.get('purpose')=='smartstore_erp')
+        shipping_profile.update({
+            'enabled':True,'header_row':1,'filename_hints':['smartstore-shipping'],
+            'columns':{
+                'order_no':['주문번호'],'line_no':['상품주문번호'],'product':['상품명'],
+                'option':['옵션'],'quantity':['수량'],'amount':['금액'],
+            },
+        })
+        purchase_profile=next(profile for profile in self.s.settings['profiles'] if profile.get('purpose')=='smartstore_purchase_erp')
+        purchase_profile.update({
+            'enabled':True,'header_row':1,'filename_hints':['smartstore-purchase'],
+            'columns':{
+                'order_no':['주문번호'],'line_no':['상품주문번호'],'product':['상품명'],
+                'option':['옵션'],'quantity':['수량'],'amount':['구매확정금액'],'paid_at':['구매확정일'],
+            },
+        })
+        shipping=self.folder/'smartstore-shipping.xlsx'
+        shipping.write_bytes(workbook_bytes(
+            ['주문번호','상품주문번호','상품명','옵션','수량','금액'],
+            [['O1','A1','테스트상품','기본',2,20000]],
+        ))
+        purchase=self.folder/'smartstore-purchase.xlsx'
+        purchase.write_bytes(workbook_bytes(
+            ['주문번호','상품주문번호','상품명','옵션','수량','구매확정금액','구매확정일'],
+            [['O1','A1','테스트상품','기본',2,18000,'2026-10-06']],
+        ))
+        self.assertEqual(self.s.import_smartstore_erp(shipping,'2026-10-06'),(1,0))
+        self.assertEqual(self.s.import_smartstore_purchase(purchase,'2026-10-06'),(1,0))
+        self.assertEqual(self.s.import_smartstore_purchase(purchase,'2026-10-06'),(0,1))
+        rows=self.s.db.execute('SELECT data,components FROM smartstore_erp_rows').fetchall()
+        self.assertEqual(len(rows),1)
+        self.assertEqual(json.loads(rows[0]['data'])['amount'],'18000')
+        self.assertEqual(sum(int(item['amount']) for item in json.loads(rows[0]['components'])),18000)
+
+    def test_smartstore_purchase_can_arrive_before_shipping_and_still_deduplicate(self):
+        _,order=self.import_order(q=1,amount=10000,channel='리큐엠_스마트스토어');self.map(order)
+        for purpose,hint,amount_name in (
+            ('smartstore_erp','shipping-first-check','금액'),
+            ('smartstore_purchase_erp','purchase-first-check','구매확정금액'),
+        ):
+            profile=next(item for item in self.s.settings['profiles'] if item.get('purpose')==purpose)
+            profile.update({
+                'enabled':True,'header_row':1,'filename_hints':[hint],
+                'columns':{
+                    'order_no':['주문번호'],'line_no':['상품주문번호'],'product':['상품명'],
+                    'option':['옵션'],'quantity':['수량'],'amount':[amount_name],
+                },
+            })
+        purchase=self.folder/'purchase-first-check.xlsx'
+        purchase.write_bytes(workbook_bytes(
+            ['주문번호','상품주문번호','상품명','옵션','수량','구매확정금액'],
+            [['O1','A1','테스트상품','기본',1,9000]],
+        ))
+        shipping=self.folder/'shipping-first-check.xlsx'
+        shipping.write_bytes(workbook_bytes(
+            ['주문번호','상품주문번호','상품명','옵션','수량','금액'],
+            [['O1','A1','테스트상품','기본',1,10000]],
+        ))
+        self.assertEqual(self.s.import_smartstore_purchase(purchase,'2026-10-06'),(1,0))
+        self.assertEqual(self.s.import_smartstore_erp(shipping,'2026-10-06'),(1,0))
+        self.assertEqual(self.s.import_smartstore_erp(shipping,'2026-10-06'),(0,1))
+        rows=self.s.db.execute('SELECT data FROM smartstore_erp_rows').fetchall()
+        self.assertEqual(len(rows),1)
+        data=json.loads(rows[0]['data'])
+        self.assertEqual((data['amount'],data['_purchase_confirmed'],data['_purchase_only']),('9000',True,False))
 
     def test_smartstore_erp_file_replaces_actual_shipment_for_erp(self):
         _,order=self.import_order(q=2,amount=20000,channel='리큐엠_스마트스토어')

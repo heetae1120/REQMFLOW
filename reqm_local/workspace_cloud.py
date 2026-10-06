@@ -8,10 +8,11 @@ from pathlib import Path
 
 
 WORKSPACE_KEY = "default"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 TABLE_ORDER = (
     "orders", "mappings", "event_rules", "requests", "request_lines",
-    "shipments", "smartstore_erp_rows", "esm_erp_rows", "fees", "artifacts", "events",
+    "shipments", "smartstore_erp_rows", "smartstore_purchase_rows", "esm_erp_rows",
+    "fees", "artifacts", "events",
 )
 DELETE_ORDER = tuple(reversed(TABLE_ORDER))
 
@@ -49,7 +50,7 @@ def workspace_digest(state: dict) -> str:
 
 
 def import_workspace(service, state: dict) -> None:
-    if int(state.get("schema_version",0)) not in (1, 2, SCHEMA_VERSION):
+    if int(state.get("schema_version",0)) not in (1, 2, 3, SCHEMA_VERSION):
         raise RuntimeError("지원하지 않는 공유 DB 형식입니다.")
     tables = state.get("tables") or {}
     with service.db:
