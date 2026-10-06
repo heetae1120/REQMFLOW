@@ -36,7 +36,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.8'
+APP_VERSION = '1.9.9'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -2038,6 +2038,13 @@ class Desktop:
         row_id=self.selected(self.history)[0];row=self.history_rows[row_id]
         source=row.get('source_file','')
         if not source:raise ValueError('선택한 이력에 연결된 판매처 주문 파일이 없습니다.')
+        if not self.service.source_file_available(source):
+            original=filedialog.askopenfilename(
+                parent=self.root,title=f'기존 원본 주문파일 연결 · {source}',
+                filetypes=[('주문 파일','*.xlsx *.xlsm *.csv')],
+            )
+            if not original:return
+            self.service.attach_source_file(source,original)
         original=Path(source)
         path=filedialog.asksaveasfilename(
             parent=self.root,title='송장번호가 반영된 판매처 주문 파일 저장',

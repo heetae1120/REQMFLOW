@@ -555,6 +555,24 @@ class Operations:
         if not row:raise ValueError('워크스페이스에 저장된 판매처 주문 파일을 찾지 못했습니다.')
         Path(path).write_bytes(row['content'])
 
+    def source_file_available(self, name):
+        return bool(self.db.execute('SELECT 1 FROM source_files WHERE name=?',(name,)).fetchone())
+
+    def attach_source_file(self, name, path):
+        source=Path(path)
+        if source.suffix.lower() not in ('.xlsx','.xlsm','.csv'):
+            raise ValueError('송장번호 반영은 XLSX, XLSM, CSV 주문 파일을 지원합니다.')
+        order_ids=[]
+        for row in self.db.execute('SELECT id,data FROM orders'):
+            if json.loads(row['data']).get('source_file')==name:order_ids.append(row['id'])
+        if not order_ids:raise ValueError('선택한 출력 이력과 연결된 주문을 찾지 못했습니다.')
+        with self.db:
+            self.db.execute('INSERT OR REPLACE INTO source_files(name,extension,content,updated_at) VALUES(?,?,?,?)',(
+                name,source.suffix.lower(),source.read_bytes(),datetime.now().isoformat(timespec='seconds'),
+            ))
+            self._sync_source_tracking(order_ids)
+            self.event('기존 주문 파일 연결',name)
+
     def match_statistics(self, orders=None):
         orders=list(orders if orders is not None else self.orders())
         ready=[order for order in orders if order['state']=='출고 준비']

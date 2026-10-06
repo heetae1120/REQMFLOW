@@ -477,6 +477,19 @@ class LocalTests(unittest.TestCase):
         refreshed=[row for row in self.s.artifact_history_rows() if row['artifact_id']==batch]
         self.assertEqual(refreshed[0]['note'],'주소 재확인 완료')
 
+    def test_existing_workspace_can_attach_an_old_order_file_before_tracking_export(self):
+        source,order=self.import_order();line=self.request(order)
+        with self.s.db:self.s.db.execute('DELETE FROM source_files')
+        self.result(line,3,'TRACK-OLD-WORKSPACE','2026-10-06')
+        self.assertFalse(self.s.source_file_available(source.name))
+        self.s.attach_source_file(source.name,source)
+        self.assertTrue(self.s.source_file_available(source.name))
+        updated=self.folder/'old-workspace-updated.xlsx';self.s.export_source_file(source.name,updated)
+        book=load_workbook(updated,data_only=True);sheet=book.active
+        headers=[cell.value for cell in sheet[1]]
+        self.assertEqual(sheet.cell(2,headers.index('송장번호')+1).value,'TRACK-OLD-WORKSPACE')
+        book.close()
+
     def test_mapping_fields_have_fixed_requested_order(self):
         self.assertEqual([FIELD_LABELS[field] for field in MAPPING_FIELD_ORDER], [
             '주문일자', '판매처주문번호', '상품주문번호', '상품명', '옵션', '수량', '금액', '배송비',
