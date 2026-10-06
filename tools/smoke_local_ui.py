@@ -11,6 +11,7 @@ if resources.exists():
     os.environ['TCL_LIBRARY']=str(resources/'tcl8.6')
     os.environ['TK_LIBRARY']=str(resources/'tk8.6')
 import tkinter as tk
+from tkinter import messagebox
 from reqm_local.desktop import Desktop, FIELD_LABELS, MAPPING_FIELD_ORDER
 from reqm_local.profiles import MATCHING_CHANNELS
 from reqm_local.service import Operations
@@ -61,6 +62,13 @@ with tempfile.TemporaryDirectory(dir=root/'outputs') as folder:
         assert app.mapping_vars['memo'].get()=='AO · 배송 메시지'
         assert app.mapping_vars['address2'].get()=='미사용'
         assert app.matching_analysis.get().startswith('2행 기준')
+        original_info=messagebox.showinfo
+        messagebox.showinfo=lambda *_args,**_kwargs:None
+        try:
+            app.save_matching_profile()
+        finally:
+            messagebox.showinfo=original_info
+        assert app.matching_profile('지그재그')['header_row']==2
         box=app.mapping_boxes['order_no']
         event=type('Event',(),{'keysym':'Hangul'})()
         for query in ('주','주문','주문번','주문번호'):

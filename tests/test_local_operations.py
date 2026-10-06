@@ -19,7 +19,9 @@ from reqm_local.shipping import ShippingCatalog, compact
 from reqm_local.ui_helpers import filter_combobox_choices, search_suggestions
 from reqm_local.workspace_cloud import export_workspace, import_workspace, workspace_digest
 from reqm_local.updater import RELEASE_API, prepare_update, version_tuple
-from reqm_local.desktop import FIELD_LABELS, MAPPING_FIELD_ORDER, calendar_month_days
+from reqm_local.desktop import (
+    FIELD_LABELS, MAPPING_FIELD_ORDER, calendar_month_days, matching_header_row_number,
+)
 from reqm_local.profiles import MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING
 from reqm_local.esm import ESM_DELIVERY_STATUSES, parse_esm_rows
 
@@ -39,6 +41,12 @@ class LocalTests(unittest.TestCase):
         weeks=calendar_month_days(2026,10)
         self.assertEqual(weeks[0],[0,0,0,0,1,2,3])
         self.assertEqual([day for week in weeks for day in week if day],list(range(1,32)))
+
+    def test_header_row_preview_value_can_be_saved_as_its_row_number(self):
+        self.assertEqual(matching_header_row_number('2 · 플랫폼 / 주문번호'),2)
+        self.assertEqual(matching_header_row_number('  17  '),17)
+        with self.assertRaisesRegex(ValueError,'헤더 행 번호'):
+            matching_header_row_number('행 선택')
 
     def test_xlsx_with_broken_a1_dimension_still_exposes_every_header(self):
         source=workbook_bytes(['주문번호','상품명','수량'],[['O1','상품',2]])

@@ -33,7 +33,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.1'
+APP_VERSION = '1.9.2'
 
 
 CHANNEL_TO_INTERNAL = {
@@ -65,6 +65,14 @@ EMPTY_COLUMN_CHOICES = ['미사용']
 
 def calendar_month_days(year: int, month: int) -> list[list[int]]:
     return calendar.Calendar(firstweekday=6).monthdayscalendar(year, month)
+
+
+def matching_header_row_number(value) -> int:
+    """Read either a plain row number or a ``2 · preview`` selector value."""
+    match=re.match(r'^\s*(\d+)',str(value or ''))
+    if not match or int(match.group(1)) < 1:
+        raise ValueError('헤더 행 번호를 올바르게 입력하세요.')
+    return int(match.group(1))
 
 
 def asset_path(*parts: str) -> Path:
@@ -963,9 +971,7 @@ class Desktop:
         if self.sample_rows is None:
             return
         try:
-            match=re.match(r'^\s*(\d+)',self.matching_header_row.get())
-            if not match:raise ValueError
-            row_index = int(match.group(1))-1
+            row_index = matching_header_row_number(self.matching_header_row.get())-1
             row = self.sample_rows[row_index]
         except (ValueError, IndexError):
             raise ValueError('헤더 행 번호를 올바르게 입력하세요.') from None
@@ -1049,7 +1055,7 @@ class Desktop:
                 {str(index):header for index,header in enumerate(self.sample_headers) if header}
                 if self.sample_headers else old.get('detected_headers', {})
             ),
-            'header_row': int(self.matching_header_row.get()),
+            'header_row': matching_header_row_number(self.matching_header_row.get()),
             'password': self.matching_password.get().strip() or old.get('password','tkdtkd8911!@@'),
             'enabled': bool(columns),
             'excludes': old.get('excludes',[]),
