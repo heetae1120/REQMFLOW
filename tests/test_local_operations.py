@@ -20,7 +20,8 @@ from reqm_local.ui_helpers import filter_combobox_choices, search_suggestions, t
 from reqm_local.workspace_cloud import export_workspace, import_workspace, workspace_digest
 from reqm_local.updater import RELEASE_API, prepare_update, version_tuple
 from reqm_local.desktop import (
-    FIELD_LABELS, MAPPING_FIELD_ORDER, calendar_month_days, matching_header_row_number,
+    COMPLETED_ORDER_STATES, FIELD_LABELS, MAPPING_FIELD_ORDER, calendar_month_days,
+    matching_header_row_number,
 )
 from reqm_local.profiles import (
     MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING, SMARTSTORE_PURCHASE_MAPPING,
@@ -47,6 +48,10 @@ class LocalTests(unittest.TestCase):
     def test_tree_sort_values_handle_numbers_and_text(self):
         self.assertLess(tree_sort_value('2'),tree_sort_value('10'))
         self.assertEqual(tree_sort_value('상품 A'),tree_sort_value('상품 a'))
+
+    def test_completed_order_filter_covers_every_already_requested_state(self):
+        self.assertEqual(COMPLETED_ORDER_STATES,{'출고 요청','부분 출고','출고 완료'})
+        self.assertNotIn('출고 준비',COMPLETED_ORDER_STATES)
 
     def test_header_row_preview_value_can_be_saved_as_its_row_number(self):
         self.assertEqual(matching_header_row_number('2 · 플랫폼 / 주문번호'),2)

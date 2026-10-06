@@ -36,7 +36,8 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.5'
+APP_VERSION = '1.9.6'
+COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
 CHANNEL_TO_INTERNAL = {
@@ -135,6 +136,8 @@ class Desktop:
         style.configure('Channel.TButton', padding=(9,7), background='#FFFFFF', foreground='#334155', bordercolor='#E2E8F0', relief='flat')
         style.configure('Complete.Channel.TButton', padding=(9,7), background='#ECFDF3', foreground='#067647', bordercolor='#A6F4C5', relief='flat')
         style.map('Complete.Channel.TButton', background=[('active','#D1FADF')])
+        style.configure('Visible.Eye.TButton', padding=(5,7), background='#ECFDF3', foreground='#047857', bordercolor='#A6F4C5', relief='flat')
+        style.configure('Hidden.Eye.TButton', padding=(5,7), background='#F1F5F9', foreground='#94A3B8', bordercolor='#E2E8F0', relief='flat')
         style.configure('Treeview', rowheight=34, font=(f,10), background='white', fieldbackground='white', foreground='#172033', bordercolor='#E2E8F0', relief='flat')
         style.configure('Treeview.Heading', font=(f,10,'bold'), background='#F1F5F9', foreground='#334155', bordercolor='#E2E8F0', relief='flat', padding=(8,8))
         style.map('Treeview', background=[('selected','#2563EB')], foreground=[('selected','white')])
@@ -221,23 +224,35 @@ class Desktop:
         channels = ttk.LabelFrame(self.order_frame,text='판매처 주문 파일',padding=(12,8))
         channels.pack(fill='x',pady=(0,10))
         self.channel_status = {}
+        self.channel_visibility = {channel:True for channel in SALES_CHANNELS}
+        self.channel_eye_text = {}
+        self.channel_eye_buttons = {}
+        self.channel_buttons = {}
         for index, channel in enumerate(SALES_CHANNELS):
             status = tk.StringVar(value=f'□  {channel}')
             self.channel_status[channel] = status
+            eye_text=tk.StringVar(value='👁')
+            self.channel_eye_text[channel]=eye_text
+            cell=ttk.Frame(channels)
+            cell.grid(row=index // 6,column=index % 6,sticky='ew',padx=4,pady=4)
             button = ttk.Button(
-                channels, textvariable=status,
+                cell, textvariable=status,
                 command=lambda selected=channel:self.safe(lambda:self.import_channel(selected)),
                 style='Channel.TButton',
             )
-            if not hasattr(self, 'channel_buttons'):
-                self.channel_buttons = {}
             self.channel_buttons[channel] = button
-            button.grid(row=index // 6,column=index % 6,sticky='ew',padx=4,pady=4)
+            button.pack(side='left',fill='x',expand=True)
+            eye=ttk.Button(
+                cell,textvariable=eye_text,width=3,style='Visible.Eye.TButton',
+                command=lambda selected=channel:self.toggle_channel_visibility(selected),
+            )
+            eye.pack(side='left',padx=(3,0))
+            self.channel_eye_buttons[channel]=eye
         for column in range(6):
             channels.columnconfigure(column,weight=1)
         ttk.Label(
             channels,
-            text='판매처를 누르거나 아래 영역에 파일을 드래그하세요. 입력 완료된 판매처는 ✓로 표시됩니다.',
+            text='판매처를 누르거나 아래 영역에 파일을 드래그하세요. ✓는 입력 완료, 눈 아이콘은 주문 목록 표시 여부입니다.',
             foreground='#64748B',
         ).grid(row=(len(SALES_CHANNELS)+5)//6,column=0,columnspan=6,sticky='w',padx=4,pady=(7,2))
         self.drop_zone = tk.Label(
@@ -269,6 +284,8 @@ class Desktop:
         self.search = tk.StringVar()
         self.filter = tk.StringVar(value='전체')
         self.unmatched_first = tk.BooleanVar(value=False)
+        self.hide_completed_orders = tk.BooleanVar(value=False)
+        self.hide_completed_text = tk.StringVar(value='출고 완료건 제외 · 꺼짐')
         self.order_counts = tk.StringVar(value='전체 0건 · 미매칭 0건')
         filters = ttk.Frame(self.order_frame)
         filters.pack(fill='x',pady=(0,8))
@@ -278,6 +295,7 @@ class Desktop:
         ttk.Combobox(filters,textvariable=self.filter,values=['전체','중복 주문','검토 필요','출고 준비','출고 요청','부분 출고','출고 완료'],state='readonly',width=14).pack(side='left')
         ttk.Checkbutton(filters,text='미매칭 상단',variable=self.unmatched_first,command=self.refresh_orders).pack(side='left',padx=(8,0))
         self.button(filters,'출고 준비 전체 선택',self.select_ready,style='Quiet.TButton')
+        ttk.Button(filters,textvariable=self.hide_completed_text,command=self.toggle_completed_orders,style='Quiet.TButton').pack(side='left',padx=(4,0))
         self.search.trace_add('write',self.on_search_changed)
         self.filter.trace_add('write',lambda *_:self.refresh_orders())
         self.search_suggestion_bar = ttk.Frame(self.order_frame)
@@ -1194,6 +1212,10 @@ class Desktop:
         for key,o in ordered:
             d=o['data']
             channel = INTERNAL_TO_CHANNEL.get(d['channel'],d['channel'])
+            if not self.channel_visibility.get(channel,True):
+                continue
+            if self.hide_completed_orders.get() and o['state'] in COMPLETED_ORDER_STATES:
+                continue
             duplicate = '강제 승인' if d.get('force_shipping_approved') else (f"중복 {o['duplicate_count']}건" if o['duplicate_count'] > 1 else '')
             source_product=d.get('source_product',d['product']);source_option=d.get('source_option',d['option'])
             converted=' / '.join(f"{c.get('name') or c.get('code')} [{c.get('logistics_code') or c.get('code')}]" for c in o['components'])
@@ -1219,6 +1241,19 @@ class Desktop:
         unmatched=sum(order['state']=='검토 필요' for order in self.rows.values())
         self.order_counts.set(f'전체 {len(self.rows):,}건 · 미매칭 {unmatched:,}건 · 표시 {shown:,}건')
         self.root.after_idle(lambda:autosize_tree(self.table))
+
+    def toggle_channel_visibility(self, channel):
+        visible=not self.channel_visibility.get(channel,True)
+        self.channel_visibility[channel]=visible
+        self.channel_eye_text[channel].set('👁' if visible else '◌')
+        self.channel_eye_buttons[channel].configure(style='Visible.Eye.TButton' if visible else 'Hidden.Eye.TButton')
+        self.refresh_orders()
+
+    def toggle_completed_orders(self):
+        hidden=not self.hide_completed_orders.get()
+        self.hide_completed_orders.set(hidden)
+        self.hide_completed_text.set('출고 완료건 제외 · 켜짐' if hidden else '출고 완료건 제외 · 꺼짐')
+        self.refresh_orders()
 
     def refresh(self):
         self.refresh_orders()
