@@ -19,6 +19,14 @@ from ecount_sales_core import ReferenceCatalog, SmartStoreOrder, convert_orders,
 from .files import parse_orders, read_rows, identifier, workbook_bytes, wekeep_workbook_bytes, REQUEST_COLUMNS, settings_at
 
 
+SMARTSTORE_CHANNEL = '리큐엠_스마트스토어'
+SMARTSTORE_ERP_CHANNEL = '리큐엠_스마트스토어_ERP'
+
+
+def is_smartstore_channel(value):
+    return identifier(value).replace(' ', '') in ('스마트스토어', SMARTSTORE_CHANNEL, SMARTSTORE_ERP_CHANNEL)
+
+
 def number(value, positive=False):
     try:
         result = Decimal(str(value).replace(',', ''))
@@ -93,6 +101,9 @@ class Operations:
         CREATE TABLE IF NOT EXISTS shipments(id TEXT PRIMARY KEY, line_id TEXT REFERENCES request_lines(id),
             qty INTEGER NOT NULL, tracking TEXT NOT NULL, day TEXT NOT NULL, erp_id TEXT, erp_amount TEXT,
             UNIQUE(line_id,tracking,day));
+        CREATE TABLE IF NOT EXISTS smartstore_erp_rows(id TEXT PRIMARY KEY, identity TEXT UNIQUE NOT NULL,
+            day TEXT NOT NULL, data TEXT NOT NULL, components TEXT NOT NULL DEFAULT '[]',
+            erp_id TEXT, issue TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS fees(bundle TEXT PRIMARY KEY, erp_id TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY, kind TEXT NOT NULL, day TEXT NOT NULL,
             content BLOB NOT NULL, registered INTEGER NOT NULL DEFAULT 0);
@@ -396,8 +407,9 @@ class Operations:
 
     def import_files(self, paths, channel_override=None):
         incoming = []
+        profiles = [profile for profile in self.settings['profiles'] if profile.get('purpose','order') == 'order']
         for path in paths:
-            incoming.extend(parse_orders(path, self.settings['profiles'], channel_override=channel_override))
+            incoming.extend(parse_orders(path, profiles, channel_override=channel_override))
         inserted = duplicates = 0
         with self.db:
             for data in incoming:
@@ -720,7 +732,7 @@ class Operations:
         headers = [identifier(x) for x in rows[0]]
         if not set(columns.values()).issubset(headers):
             raise ValueError('물류 결과 헤더가 맞지 않습니다. 결과 양식 또는 설정을 확인하세요.')
-        added = duplicates = 0
+        added = duplicates = smartstore_skipped = 0
         with self.db:
             for row in rows[1:]:
                 if not any(x not in (None, '') for x in row):
@@ -733,6 +745,10 @@ class Operations:
                 line = self.db.execute('SELECT * FROM request_lines WHERE id=?', (line_id,)).fetchone()
                 if not line:
                     raise ValueError(f'알 수 없는 요청행ID: {line_id}')
+                order_data = json.loads(self.db.execute('SELECT data FROM orders WHERE id=?', (line['order_id'],)).fetchone()['data'])
+                if self.smartstore_erp_enabled() and is_smartstore_channel(order_data.get('channel')):
+                    smartstore_skipped += 1
+                    continue
                 old = self.db.execute('SELECT qty FROM shipments WHERE line_id=? AND tracking=? AND day=?', (line_id,tracking,shipped_on)).fetchone()
                 if old:
                     if old[0] != q:
@@ -755,8 +771,121 @@ class Operations:
                 totals = self.db.execute('SELECT SUM(qty) FROM request_lines WHERE order_id=?', (line['order_id'],)).fetchone()[0]
                 shipped = self.db.execute('SELECT SUM(s.qty) FROM shipments s JOIN request_lines r ON s.line_id=r.id WHERE r.order_id=?', (line['order_id'],)).fetchone()[0]
                 self.db.execute('UPDATE orders SET state=? WHERE id=?', ('출고 완료' if totals == shipped else '부분 출고',line['order_id']))
-            self.event('물류 결과 반영', f'신규 {added}, 중복 {duplicates}')
+            self.event('물류 결과 반영', f'신규 {added}, 중복 {duplicates}, 스마트스토어 제외 {smartstore_skipped}')
         return added, duplicates
+
+    def _smartstore_erp_profile(self):
+        return next((profile for profile in self.settings.get('profiles', [])
+                     if profile.get('purpose') == 'smartstore_erp' or profile.get('channel') == SMARTSTORE_ERP_CHANNEL), None)
+
+    def smartstore_erp_enabled(self):
+        profile=self._smartstore_erp_profile()
+        return bool(profile and profile.get('enabled') and profile.get('columns'))
+
+    @staticmethod
+    def _reprice_components(components, total, source_quantity):
+        rows = [dict(component) for component in components]
+        if not rows:
+            return []
+        total = number(total)
+        weights = [number(component.get('amount','0')) for component in rows]
+        weight_total = sum(weights, Decimal('0'))
+        allocated = []
+        remaining = total
+        for index, component in enumerate(rows):
+            if index == 0:
+                amount = Decimal('0')
+            elif weight_total:
+                amount = (total * weights[index] / weight_total).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+                remaining -= amount
+            else:
+                amount = Decimal('0')
+            allocated.append({**component, 'quantity':source_quantity, 'source_quantity':source_quantity, 'amount':str(amount)})
+        allocated[0]['amount'] = str(remaining)
+        return allocated
+
+    def _smartstore_erp_components(self, data):
+        candidates = [order for order in self.orders() if is_smartstore_channel(order['data'].get('channel'))]
+        original = next((order for order in candidates if data.get('line_no') and order['data'].get('line_no') == data['line_no']), None)
+        if original is None:
+            original = next((order for order in candidates if order['data'].get('order_no') == data.get('order_no')
+                             and order['data'].get('product') == data.get('product')
+                             and order['data'].get('option') == data.get('option')), None)
+        if original and original['components']:
+            return self._reprice_components(original['components'], data['amount'], quantity(data['quantity'])), ''
+        lookup = {**data, 'channel':SMARTSTORE_CHANNEL, 'account':data.get('account','기본')}
+        custom = self.db.execute('SELECT components FROM mappings WHERE key=?', (self.mapping_key(lookup),)).fetchone()
+        if custom:
+            components, issue = self._build_components(lookup, json.loads(custom[0]))
+            return components, issue
+        return [], '스마트스토어 주문 또는 저장된 상품·세트 매칭을 찾지 못했습니다.'
+
+    def import_smartstore_erp(self, path, on):
+        profile = self._smartstore_erp_profile()
+        if not profile or not profile.get('enabled'):
+            raise ValueError('매칭 설정에서 스마트스토어 ERP매칭 파일과 열을 먼저 저장하세요.')
+        shipped_on = day(on)
+        incoming = parse_orders(path, [profile], channel_override=SMARTSTORE_ERP_CHANNEL)
+        added = duplicates = 0
+        with self.db:
+            for data in incoming:
+                data['channel'] = SMARTSTORE_CHANNEL
+                data['account'] = data.get('account') or '기본'
+                data['quantity'] = str(quantity(data.get('quantity') or '1'))
+                data['amount'] = str(money(data.get('amount') or '0'))
+                data['shipping'] = str(money(data.get('shipping') or '0'))
+                token = encode([
+                    shipped_on, data.get('order_no'), data.get('line_no'), data.get('product'),
+                    data.get('option'), data.get('quantity'), data.get('amount'),
+                ])
+                identity = hashlib.sha256(token.encode('utf-8')).hexdigest()
+                if self.db.execute('SELECT 1 FROM smartstore_erp_rows WHERE identity=?',(identity,)).fetchone():
+                    duplicates += 1
+                    continue
+                components, issue = self._smartstore_erp_components(data)
+                self.db.execute('INSERT INTO smartstore_erp_rows VALUES(?,?,?,?,?,?,?)',
+                    (uuid.uuid4().hex,identity,shipped_on,encode(data),encode(components),None,issue))
+                added += 1
+            self.event('스마트스토어 ERP 원본 반영',f'신규 {added}, 중복 {duplicates}, 출고일 {shipped_on}')
+        return added, duplicates
+
+    def confirmed_erp_entries(self, on=None):
+        selected_day = day(on) if on else None
+        entries = []
+        query = '''SELECT s.*, r.order_id, r.component FROM shipments s
+            JOIN request_lines r ON s.line_id=r.id'''
+        parameters = []
+        if selected_day:
+            query += ' WHERE s.day=?'; parameters.append(selected_day)
+        orders = {order['id']:order for order in self.orders()}
+        for row in self.db.execute(query+' ORDER BY s.day,s.rowid',parameters):
+            order = orders[row['order_id']]
+            if self.smartstore_erp_enabled() and is_smartstore_channel(order['data'].get('channel')):
+                continue
+            component = order['components'][row['component']]
+            entries.append({'source':'일반 실제출고','id':row['id'],'day':row['day'],
+                'channel':order['data']['channel'],'order_no':order['data']['order_no'],
+                'recipient':order['data']['recipient'],'product':component.get('name') or component.get('code',''),
+                'code':component.get('code',''),'quantity':row['qty'],'amount':row['erp_amount'] or '',
+                'tracking':row['tracking'],'issue':'','erp_id':row['erp_id']})
+        query = 'SELECT * FROM smartstore_erp_rows'
+        parameters = []
+        if selected_day:
+            query += ' WHERE day=?';parameters.append(selected_day)
+        for row in self.db.execute(query+' ORDER BY day,rowid',parameters):
+            data=json.loads(row['data']);components=json.loads(row['components'])
+            if not components:
+                entries.append({'source':'스마트스토어 ERP','id':f"SSERP:{row['id']}:0",'day':row['day'],
+                    'channel':'스마트스토어','order_no':data.get('order_no',''),'recipient':data.get('recipient',''),
+                    'product':data.get('product',''),'code':'','quantity':data.get('quantity',''),
+                    'amount':'','tracking':'','issue':row['issue'],'erp_id':row['erp_id']})
+            for index,component in enumerate(components):
+                entries.append({'source':'스마트스토어 ERP','id':f"SSERP:{row['id']}:{index}",'day':row['day'],
+                    'channel':'스마트스토어','order_no':data.get('order_no',''),'recipient':data.get('recipient',''),
+                    'product':component.get('name') or component.get('code',''),'code':component.get('code',''),
+                    'quantity':component.get('quantity',data.get('quantity','')),'amount':component.get('amount',''),
+                    'tracking':'','issue':row['issue'],'erp_id':row['erp_id']})
+        return entries
 
     def pending_erp_shipments(self, on=None):
         """Return actual shipments waiting for ERP, including their editable ERP amount."""
@@ -773,19 +902,36 @@ class Operations:
         for row in rows:
             order = orders[row['order_id']]
             data = order['data']
+            if self.smartstore_erp_enabled() and is_smartstore_channel(data.get('channel')):
+                continue
             component = order['components'][row['component']]
             result.append({
                 'id':row['id'], 'day':row['day'], 'order_no':data['order_no'],
                 'recipient':data['recipient'], 'product':component.get('name') or component.get('code',''),
                 'code':component.get('code',''), 'quantity':row['qty'],
-                'amount':row['erp_amount'] or '', 'tracking':row['tracking'],
+                'amount':row['erp_amount'] or '', 'tracking':row['tracking'], 'source':'일반 실제출고',
             })
         return result
+
+    def pending_erp_entries(self, on=None):
+        return [entry for entry in self.confirmed_erp_entries(on) if not entry.get('erp_id')]
 
     def set_erp_amount(self, shipment_id, amount):
         value = number(amount)
         if value != value.to_integral_value():
             raise ValueError('ERP 반영 금액은 원 단위 정수로 입력하세요.')
+        if str(shipment_id).startswith('SSERP:'):
+            _,row_id,index_text = shipment_id.split(':',2)
+            with self.db:
+                row=self.db.execute('SELECT components,erp_id FROM smartstore_erp_rows WHERE id=?',(row_id,)).fetchone()
+                if not row:raise ValueError('스마트스토어 ERP 내역을 찾지 못했습니다.')
+                if row['erp_id']:raise ValueError('이미 ERP 파일에 반영된 금액은 변경할 수 없습니다.')
+                components=json.loads(row['components']);index=int(index_text)
+                if not (0 <= index < len(components)):raise ValueError('세트 구성품을 먼저 설정하세요.')
+                components[index]['amount']=str(value)
+                self.db.execute('UPDATE smartstore_erp_rows SET components=? WHERE id=?',(encode(components),row_id))
+                self.event('ERP 금액 매칭',f'{shipment_id}: {value}')
+            return
         with self.db:
             row = self.db.execute('SELECT erp_id FROM shipments WHERE id=?', (shipment_id,)).fetchone()
             if not row:
@@ -795,18 +941,50 @@ class Operations:
             self.db.execute('UPDATE shipments SET erp_amount=? WHERE id=?', (str(value),shipment_id))
             self.event('ERP 금액 매칭', f'{shipment_id}: {value}')
 
+    def smartstore_erp_row(self, entry_id):
+        if not str(entry_id).startswith('SSERP:'):
+            return None
+        row_id=entry_id.split(':',2)[1]
+        row=self.db.execute('SELECT * FROM smartstore_erp_rows WHERE id=?',(row_id,)).fetchone()
+        return {**dict(row),'data':json.loads(row['data']),'components':json.loads(row['components'])} if row else None
+
+    def set_smartstore_erp_components(self, entry_id, components):
+        row=self.smartstore_erp_row(entry_id)
+        if not row:raise ValueError('스마트스토어 ERP 행에서만 세트 구성을 수정할 수 있습니다.')
+        if row['erp_id']:raise ValueError('이미 ERP 파일로 만든 행은 수정할 수 없습니다.')
+        definitions,customer=self._prepare_component_definitions(SMARTSTORE_CHANNEL,components)
+        built,issue=self._build_components(row['data'],definitions)
+        if issue:raise ValueError(issue)
+        with self.db:
+            self.db.execute('UPDATE smartstore_erp_rows SET components=?,issue=? WHERE id=?',(encode(built),'',row['id']))
+            self.db.execute('INSERT OR REPLACE INTO mappings VALUES(?,?)',(self.mapping_key(row['data']),encode(definitions)))
+            self.event('스마트스토어 ERP 세트 분리',row['id'])
+        if customer:
+            self.settings.setdefault('channel_customer_codes',{})[SMARTSTORE_CHANNEL]=customer
+            self._write_settings()
+
     def export_erp(self, on, through, path):
         on, through = day(on), day(through)
         batch = 'E-' + uuid.uuid4().hex[:12]
         pending = self.db.execute('''SELECT s.*, r.order_id, r.component FROM shipments s
             JOIN request_lines r ON s.line_id=r.id WHERE s.erp_id IS NULL AND s.day<=? ORDER BY s.day,s.rowid''', (through,)).fetchall()
-        if not pending:
+        orders = {o['id']:o for o in self.orders()}
+        if self.smartstore_erp_enabled():
+            pending = [shipment for shipment in pending if not is_smartstore_channel(orders[shipment['order_id']]['data'].get('channel'))]
+        smart_rows=self.db.execute('SELECT * FROM smartstore_erp_rows WHERE erp_id IS NULL AND day<=? ORDER BY day,rowid',(through,)).fetchall()
+        if not pending and not smart_rows:
             raise ValueError('선택한 날짜까지 ERP 파일에 반영하지 않은 실제 출고가 없습니다.')
         unmatched = [shipment for shipment in pending if shipment['erp_amount'] in (None,'')]
         if unmatched:
             raise ValueError(f'ERP 금액 매칭이 필요한 실제 출고가 {len(unmatched):,}건 있습니다.')
+        smart_unmatched=[]
+        for row in smart_rows:
+            components=json.loads(row['components'])
+            if row['issue'] or not components or any(component.get('amount') in (None,'') for component in components):
+                smart_unmatched.append(row)
+        if smart_unmatched:
+            raise ValueError(f'금액 매칭 또는 세트 분리가 필요한 스마트스토어 ERP 주문이 {len(smart_unmatched):,}건 있습니다.')
         rows = []
-        orders = {o['id']:o for o in self.orders()}
         def append(c, q, amount):
             # Split integer won totals into two unit prices to retain exact totals.
             total = int(amount.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
@@ -821,10 +999,16 @@ class Operations:
                 c = order['components'][shipment['component']]
                 append(c, shipment['qty'], number(shipment['erp_amount']))
                 self.db.execute('UPDATE shipments SET erp_id=? WHERE id=?', (batch,shipment['id']))
+            for smart_row in smart_rows:
+                for component in json.loads(smart_row['components']):
+                    append(component,quantity(component['quantity']),number(component['amount']))
+                self.db.execute('UPDATE smartstore_erp_rows SET erp_id=? WHERE id=?',(batch,smart_row['id']))
             groups = {}
             for order in orders.values():
                 groups.setdefault(self.bundle_key(order['data']),[]).append(order)
             for bundle, group in groups.items():
+                if self.smartstore_erp_enabled() and any(is_smartstore_channel(order['data'].get('channel')) for order in group):
+                    continue
                 if any(o['state'] != '출고 완료' for o in group):
                     continue
                 if any(self.db.execute('SELECT COUNT(*) FROM shipments s JOIN request_lines r ON s.line_id=r.id WHERE r.order_id=? AND s.erp_id IS NULL', (o['id'],)).fetchone()[0] for o in group):

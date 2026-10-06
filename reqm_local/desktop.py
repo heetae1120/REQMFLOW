@@ -25,16 +25,17 @@ from .ui_helpers import (
     post_combobox, search_suggestions,
 )
 from .workspace_cloud import CloudWorkspace, WorkspaceConflict
-from .profiles import PROFILE_PRESETS, SALES_CHANNELS
+from .profiles import PROFILE_PRESETS, SALES_CHANNELS, MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING
 from .column_matching import match_columns
 from .shipping import compact, channel_key
 
 
-APP_VERSION = '1.6.10'
+APP_VERSION = '1.7.0'
 
 
 CHANNEL_TO_INTERNAL = {
     '스마트스토어': '리큐엠_스마트스토어',
+    SMARTSTORE_ERP_MAPPING: '리큐엠_스마트스토어_ERP',
 }
 INTERNAL_TO_CHANNEL = {value: key for key, value in CHANNEL_TO_INTERNAL.items()}
 
@@ -270,31 +271,38 @@ class Desktop:
         result_input = ttk.Frame(result_tabs,padding=20)
         amount_frame = ttk.Frame(result_tabs,padding=20)
         erp_frame = ttk.Frame(result_tabs,padding=20)
-        result_tabs.add(result_input,text='1  실제 출고 입력')
-        result_tabs.add(amount_frame,text='2  금액 매칭')
-        result_tabs.add(erp_frame,text='3  ERP 파일 생성')
-        ttk.Label(result_input,text='실제 출고 결과 입력',font=(self.font_family,18,'bold')).pack(anchor='w')
-        ttk.Label(result_input,text='물류사에서 출고가 확정된 파일만 반영합니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
+        self.erp_ship_day = tk.StringVar(value=date.today().isoformat())
+        result_tabs.add(result_input,text='1  출고건 확인')
+        result_tabs.add(amount_frame,text='2  금액 매칭 및 세트 분리')
+        result_tabs.add(erp_frame,text='3  ERP 파일 생성 및 다운로드')
+        ttk.Label(result_input,text='당일 출고건 확인',font=(self.font_family,18,'bold')).pack(anchor='w')
+        ttk.Label(result_input,text='일반 판매처 실제출고 파일과 스마트스토어 ERP 원본을 각각 입력합니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
         result_card = ttk.LabelFrame(result_input,text='입력 파일',padding=18)
         result_card.pack(fill='x')
-        ttk.Label(result_card,text='필수 열',foreground='#64748B').grid(row=0,column=0,sticky='w')
-        ttk.Label(result_card,text='요청행ID · 출고수량 · 송장번호 · 실제출고일',font=(self.font_family,10,'bold')).grid(row=1,column=0,sticky='w',pady=(2,14))
-        ttk.Label(result_card,text='동일 결과는 중복 제외하며 변경·초과 수량은 전체 입력을 취소합니다.',foreground='#64748B').grid(row=2,column=0,sticky='w')
+        ttk.Label(result_card,text='입력 구분',foreground='#64748B').grid(row=0,column=0,sticky='w')
+        ttk.Label(result_card,text='일반 판매처: 실제출고 결과 · 스마트스토어: ERP 입력 원본',font=(self.font_family,10,'bold')).grid(row=1,column=0,sticky='w',pady=(2,14))
+        ttk.Label(result_card,text='일반 실제출고에서는 스마트스토어 행을 제외하고, 스마트스토어는 전용 ERP매칭을 사용합니다.',foreground='#64748B').grid(row=2,column=0,sticky='w')
         result_actions = ttk.Frame(result_card);result_actions.grid(row=0,column=1,rowspan=3,sticky='e',padx=(40,0))
         self.button(result_actions,'빈 양식 저장',self.result_template,style='Quiet.TButton')
-        self.button(result_actions,'결과 파일 입력',self.results,style='Accent.TButton')
+        self.button(result_actions,'일반 실제출고 입력',self.results,style='Accent.TButton')
+        self.button(result_actions,'스마트스토어 ERP 입력',self.smartstore_erp_results,style='Accent.TButton')
         result_card.columnconfigure(0,weight=1)
-        ttk.Label(amount_frame,text='출고 금액 매칭',font=(self.font_family,18,'bold')).pack(anchor='w')
-        ttk.Label(amount_frame,text='품목은 주문 화면에서 확정하고, 이카운트 반영 금액만 확인하거나 수정합니다.',foreground='#64748B').pack(anchor='w',pady=(4,16))
+        confirmed_line=ttk.Frame(result_input);confirmed_line.pack(fill='x',pady=(12,8))
+        ttk.Label(confirmed_line,text='출고일').pack(side='left')
+        ttk.Entry(confirmed_line,textvariable=self.erp_ship_day,width=12).pack(side='left',padx=6)
+        self.button(confirmed_line,'출고건 조회',self.refresh_confirmed_shipments,style='Quiet.TButton')
+        self.confirmed_shipments = self.tree(result_input,['구분','출고일','판매처','주문번호','이름','품목','수량','송장번호'],[130,105,140,160,100,260,70,150])
+        ttk.Label(amount_frame,text='금액 매칭 및 세트 분리',font=(self.font_family,18,'bold')).pack(anchor='w')
+        ttk.Label(amount_frame,text='출고 확인된 품목의 ERP 금액을 확인하고, 스마트스토어 세트 구성은 필요할 때 수정합니다.',foreground='#64748B').pack(anchor='w',pady=(4,16))
         amount_line = ttk.Frame(amount_frame); amount_line.pack(fill='x',pady=(0,10))
-        self.erp_ship_day = tk.StringVar(value=date.today().isoformat())
         ttk.Label(amount_line,text='실제 출고일').pack(side='left')
         ttk.Entry(amount_line,textvariable=self.erp_ship_day,width=12).pack(side='left',padx=6)
         self.button(amount_line,'조회',self.refresh_erp_shipments)
         self.button(amount_line,'선택 금액 매칭',self.match_erp_amount,style='Accent.TButton')
-        self.erp_shipments = self.tree(amount_frame,['실제 출고일','주문번호','이름','ERP 품목코드','ERP 품목명','출고수량','ERP 반영금액'],[110,150,110,150,250,80,120])
+        self.button(amount_line,'선택 세트 구성',self.edit_erp_set,style='Quiet.TButton')
+        self.erp_shipments = self.tree(amount_frame,['구분','실제 출고일','주문번호','이름','ERP 품목코드','ERP 품목명','출고수량','ERP 반영금액'],[125,110,150,110,150,250,80,120])
         self.erp_shipments.bind('<Double-1>',lambda _event:self.safe(self.match_erp_amount))
-        ttk.Label(erp_frame,text='이카운트 ERP 파일 생성',font=(self.font_family,18,'bold')).pack(anchor='w')
+        ttk.Label(erp_frame,text='이카운트 ERP 파일 생성 및 다운로드',font=(self.font_family,18,'bold')).pack(anchor='w')
         ttk.Label(erp_frame,text='금액 매칭이 완료된 미반영 출고 건만 파일에 포함됩니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
         self.through = tk.StringVar(value=date.today().isoformat())
         self.voucher = tk.StringVar(value=date.today().isoformat())
@@ -641,7 +649,7 @@ class Desktop:
             bg='#172033', fg='#E2E8F0', selectbackground='#C7FF4A', selectforeground='#172033',
             font=(self.font_family,10,'bold'), highlightthickness=0,
         )
-        for channel in SALES_CHANNELS:
+        for channel in MATCHING_CHANNELS:
             self.matching_sites.insert('end',channel)
         self.matching_sites.pack(fill='both',expand=True)
         self.matching_sites.bind('<<ListboxSelect>>',self.load_matching_profile)
@@ -650,7 +658,7 @@ class Desktop:
         right.pack(side='left',fill='both',expand=True)
         identity = ttk.LabelFrame(right,text='01  파일 인식 기준',padding=13)
         identity.pack(fill='x')
-        self.matching_channel = tk.StringVar(value=SALES_CHANNELS[0])
+        self.matching_channel = tk.StringVar(value=MATCHING_CHANNELS[0])
         self.matching_filename = tk.StringVar()
         self.matching_sample = tk.StringVar(value='예시 파일을 선택하지 않았습니다.')
         self.matching_analysis = tk.StringVar(value='파일을 추가하면 열을 분석해 1차 매칭을 채웁니다.')
@@ -710,7 +718,7 @@ class Desktop:
 
     def selected_matching_channel(self):
         selection = self.matching_sites.curselection()
-        return SALES_CHANNELS[selection[0]] if selection else SALES_CHANNELS[0]
+        return MATCHING_CHANNELS[selection[0]] if selection else MATCHING_CHANNELS[0]
 
     def matching_profile(self, channel):
         internal = CHANNEL_TO_INTERNAL.get(channel,channel)
@@ -924,6 +932,7 @@ class Desktop:
                         if field != 'address'},
             'sum_columns': old.get('sum_columns') or preset.get('sum_columns',{}),
             'amount_is_unit': old.get('amount_is_unit', preset.get('amount_is_unit',False)),
+            'purpose': old.get('purpose', preset.get('purpose','order')),
         }
         profiles = self.service.settings.setdefault('profiles',[])
         for index,item in enumerate(profiles):
@@ -1012,6 +1021,7 @@ class Desktop:
     def refresh(self):
         self.refresh_orders()
         self.refresh_erp_shipments()
+        self.refresh_confirmed_shipments()
         self.refresh_channel_status()
         counts={state:sum(o['state']==state for o in self.rows.values()) for state in ['검토 필요','출고 준비','출고 요청','부분 출고','출고 완료']}
         stats=self.service.match_statistics(self.rows.values())
@@ -1480,20 +1490,41 @@ class Desktop:
             new,duplicate=self.service.import_results(path);self.refresh()
             messagebox.showinfo('반영 완료',f'실제 출고 {new}행 · 중복 제외 {duplicate}행')
 
+    def smartstore_erp_results(self):
+        path=filedialog.askopenfilename(
+            parent=self.root,title='스마트스토어 ERP 입력 원본 선택',
+            filetypes=[('스마트스토어 ERP 파일','*.xlsx *.xlsm *.xls *.csv')],
+        )
+        if path:
+            new,duplicate=self.service.import_smartstore_erp(path,self.erp_ship_day.get());self.refresh()
+            messagebox.showinfo('반영 완료',f'스마트스토어 ERP {new}행 · 중복 제외 {duplicate}행')
+
+    def refresh_confirmed_shipments(self):
+        if not hasattr(self,'confirmed_shipments'):
+            return
+        self.confirmed_shipments.delete(*self.confirmed_shipments.get_children())
+        for entry in self.service.confirmed_erp_entries(self.erp_ship_day.get()):
+            self.confirmed_shipments.insert('', 'end', iid='confirmed-'+entry['id'], values=[
+                entry['source'],entry['day'],INTERNAL_TO_CHANNEL.get(entry['channel'],entry['channel']),
+                entry['order_no'],entry['recipient'],entry['product'],entry['quantity'],entry['tracking'] or '—',
+            ])
+        self.root.after_idle(lambda:autosize_tree(self.confirmed_shipments,maximum=300))
+
     def refresh_erp_shipments(self):
         if not hasattr(self,'erp_shipments'):
             return
         self.erp_shipments.delete(*self.erp_shipments.get_children())
-        for shipment in self.service.pending_erp_shipments(self.erp_ship_day.get()):
+        for shipment in self.service.pending_erp_entries(self.erp_ship_day.get()):
             self.erp_shipments.insert('', 'end', iid=shipment['id'], values=[
-                shipment['day'],shipment['order_no'],shipment['recipient'],shipment['code'],shipment['product'],
+                shipment['source'],shipment['day'],shipment['order_no'],shipment['recipient'],shipment['code'],shipment['product'],
                 shipment['quantity'],f"{int(Decimal(shipment['amount'])):,}" if shipment['amount'] else '미매칭',
-            ])
+            ],tags=('review',) if shipment.get('issue') else ())
+        self.erp_shipments.tag_configure('review',foreground='#BE123C',background='#FFF1F2')
         self.root.after_idle(lambda:autosize_tree(self.erp_shipments,maximum=320))
 
     def match_erp_amount(self):
         shipment_id=self.selected(self.erp_shipments)[0]
-        shipment=next(row for row in self.service.pending_erp_shipments() if row['id']==shipment_id)
+        shipment=next(row for row in self.service.pending_erp_entries() if row['id']==shipment_id)
         value=simpledialog.askstring(
             'ERP 금액 매칭',
             f"주문번호: {shipment['order_no']}\n품목: {shipment['product']}\n출고수량: {shipment['quantity']}\n\n이카운트에 반영할 총금액을 입력하세요.",
@@ -1502,6 +1533,58 @@ class Desktop:
         if value is None:return
         self.service.set_erp_amount(shipment_id,value.replace(',',''))
         self.refresh_erp_shipments()
+
+    def edit_erp_set(self):
+        entry_id=self.selected(self.erp_shipments)[0]
+        row=self.service.smartstore_erp_row(entry_id)
+        if not row:
+            raise ValueError('세트 구성 수정은 스마트스토어 ERP 입력 건에서 사용할 수 있습니다.')
+        data=row['data']
+        win=tk.Toplevel(self.root);win.title('스마트스토어 ERP 세트 분리');win.geometry('1120x620');win.transient(self.root);win.grab_set()
+        ttk.Label(win,text='스마트스토어 ERP 세트 분리',font=(self.font_family,17,'bold'),padding=(16,14)).pack(anchor='w')
+        ttk.Label(win,text=f"{data.get('order_no')}  |  {data.get('product')} / {data.get('option')}",padding=(16,0)).pack(anchor='w')
+        ttk.Label(win,text='첫 구성품은 주문 총금액에서 부속품 단가를 뺀 금액으로 자동 계산됩니다.',foreground='#64748B',padding=(16,6)).pack(anchor='w')
+        grid=ttk.Frame(win,padding=16);grid.pack(fill='both',expand=True)
+        labels=['ERP 품목코드','품목명','부속품 단가','출하창고','거래처코드']
+        for column,label in enumerate(labels):ttk.Label(grid,text=label).grid(row=0,column=column,padx=4,pady=6,sticky='w')
+        entries=[]
+        customer=self.service.channel_customer_code('리큐엠_스마트스토어')
+        def add_row(component=None):
+            component=component or {}
+            index=len(entries)
+            quantity=max(1,int(component.get('quantity') or data.get('quantity') or 1))
+            unit='0' if index==0 else str(int(Decimal(component.get('amount','0'))/Decimal(quantity)))
+            values={
+                'code':tk.StringVar(value=component.get('code','')),
+                'name':tk.StringVar(value=component.get('name','')),
+                'unit_amount':tk.StringVar(value=unit),
+                'warehouse':tk.StringVar(value=component.get('warehouse',self.service.settings['warehouse'])),
+                'customer':tk.StringVar(value=component.get('customer',customer)),
+            }
+            widgets=[]
+            for column,key in enumerate(('code','name','unit_amount','warehouse','customer')):
+                widget=ttk.Entry(grid,textvariable=values[key],width=(24 if key in ('code','customer') else 34 if key=='name' else 13))
+                widget.grid(row=index+1,column=column,padx=4,pady=4,sticky='ew');widgets.append(widget)
+            entries.append((values,widgets))
+        for component in row['components']:add_row(component)
+        if not entries:add_row()
+        def remove_row():
+            if len(entries)>1:
+                _,widgets=entries.pop()
+                for widget in widgets:widget.destroy()
+        def save():
+            components=[]
+            for values,_ in entries:
+                item={key:value.get().strip() for key,value in values.items()}
+                item.update({'logistics_code':item['code'],'quantity':'1'})
+                components.append(item)
+            self.service.set_smartstore_erp_components(entry_id,components)
+            win.destroy();self.refresh_erp_shipments();self.refresh_confirmed_shipments()
+        actions=ttk.Frame(win,padding=16);actions.pack(fill='x')
+        self.button(actions,'구성품 추가',lambda:add_row())
+        self.button(actions,'마지막 구성품 삭제',remove_row,style='Danger.TButton')
+        self.button(actions,'세트 구성 저장',save,style='Accent.TButton')
+        self.button(actions,'닫기',win.destroy)
 
     def erp(self):
         path=self.save_path('ERP_'+self.voucher.get()+'.xlsx')
