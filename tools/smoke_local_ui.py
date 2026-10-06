@@ -12,6 +12,7 @@ if resources.exists():
     os.environ['TK_LIBRARY']=str(resources/'tk8.6')
 import tkinter as tk
 from reqm_local.desktop import Desktop, FIELD_LABELS, MAPPING_FIELD_ORDER
+from reqm_local.profiles import MATCHING_CHANNELS
 from reqm_local.service import Operations
 
 with tempfile.TemporaryDirectory(dir=root/'outputs') as folder:
@@ -30,6 +31,27 @@ with tempfile.TemporaryDirectory(dir=root/'outputs') as folder:
         ]
         assert 'address1' in app.mapping_boxes and 'address2' in app.mapping_boxes
         assert str(app.mapping_boxes['order_no'].cget('state')) == 'normal'
+        assert app.erp_include_esm.get() is True
+        assert tuple(app.history['columns']) == (
+            '출력일(요일)','출고일','종류','판매처','주문번호','수령인','연락처',
+            '판매품목','옵션','수량','금액','등록','묶음 ID',
+        )
+        zigzag_headers=['']*47
+        for index,label in {
+            1:'상품주문번호',2:'주문번호',3:'결제일',4:'주문상태',16:'상품코드',18:'상품명',
+            22:'옵션정보',26:'수량',27:'상품주문액 (원)',32:'총 배송비 (원)',35:'수령인명',
+            36:'수령인 연락처',37:'배송지 주소',38:'우편번호',40:'배송 메시지',44:'채널분류',
+        }.items():zigzag_headers[index]=label
+        app.matching_sites.selection_clear(0,'end')
+        app.matching_sites.selection_set(MATCHING_CHANNELS.index('지그재그'))
+        app.load_matching_profile()
+        app.sample_rows=[tuple(zigzag_headers),tuple(['']*47)]
+        app.matching_header_row.set('1')
+        app.apply_sample_headers(force_auto=True)
+        assert len(app.mapping_choice_values)==17
+        assert app.mapping_vars['order_no'].get()=='C · 주문번호'
+        assert app.mapping_vars['product'].get()=='S · 상품명'
+        assert app.mapping_vars['memo'].get()=='AO · 배송 메시지'
         box=app.mapping_boxes['order_no']
         event=type('Event',(),{'keysym':'Hangul'})()
         for query in ('주','주문','주문번','주문번호'):

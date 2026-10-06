@@ -42,6 +42,12 @@ PROFILE_PRESETS = [
         'quantity':['수량'],'amount':['최종 상품별 총 주문금액','결제금액','금액'],
         'paid_at':['결제일','주문일자'],
     },required=[],password='1234',enabled=False,purpose='smartstore_erp'),
+    profile('지그재그',['order_item_list-PRE_SHIPMENT','지그재그'],{
+        'order_no':['주문번호'],'line_no':['상품주문번호'],'source_item_code':['상품코드'],'product':['상품명'],
+        'option':['옵션정보'],'quantity':['수량'],'amount':['상품주문액 (원)'],'shipping':['총 배송비 (원)'],
+        'recipient':['수령인명'],'phone':['수령인 연락처'],'postcode':['우편번호'],'address':['배송지 주소'],
+        'memo':['배송 메시지'],'paid_at':['결제일'],'status':['주문상태'],'bundle':['주문번호'],
+    },content_rule={'required_headers':['상품주문번호','채널분류','상품주문액 (원)']}),
     profile('쌤몰',['o_20260721_1509_readyDeliveryList.csv','readyDeliveryList'],{
         'order_no':['배송번호'],'line_no':['품목별 주문번호'],'product':['주문상품명(기간할인 제목+버전)'],
         'option':['상품옵션'],'quantity':['주문품목 수량'],'amount':['판매가격'],'recipient':['수령인명'],
@@ -159,6 +165,9 @@ PROFILE_PRESETS = [
 PRESET_COLUMN_INDEXES = {
     '스마트스토어': {'order_no':1,'line_no':0,'product':16,'option':20,'quantity':21,'amount':27,'recipient':13,'phone':48,'postcode':52,'address':50,'paid_at':29,'status':3,'bundle':42,'shipping':45},
     SMARTSTORE_ERP_MAPPING: {},
+    '지그재그': {'order_no':2,'line_no':1,'source_item_code':16,'product':18,'option':22,'quantity':26,
+              'amount':27,'shipping':32,'recipient':35,'phone':36,'postcode':38,'address':37,
+              'memo':40,'paid_at':3,'status':4,'bundle':2},
     '쌤몰': {'order_no':0,'line_no':1,'product':3,'option':4,'quantity':6,'amount':22,'recipient':8,'phone':10,'postcode':11,'memo':15,'paid_at':28,'status':26,'bundle':0,'shipping':16},
     '29CM': {'order_no':3,'line_no':0,'source_item_code':7,'product':8,'option':10,'quantity':11,'amount':21,'recipient':6,'phone':22,'postcode':23,'address':24,'memo':25,'paid_at':29,'status':33,'bundle':1},
     '이지웰': {'order_no':3,'line_no':5,'source_item_code':10,'product':11,'option':13,'quantity':14,'amount':45,'recipient':36,'phone':37,'postcode':38,'address':39,'memo':40,'paid_at':2,'status':21,'bundle':6,'shipping':44},

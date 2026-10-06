@@ -347,8 +347,20 @@ def read_rows(path, passwords=None):
     if raw.startswith(b'PK'):
         book = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
         try:
-            sheet = max(book.worksheets, key=lambda ws: ws.max_row * ws.max_column)
-            return list(sheet.values)
+            # Some marketplace exports (including Zigzag) contain a bogus
+            # ``<dimension ref="A1">`` even though sheetData has dozens of
+            # columns.  Read-only openpyxl trusts that hint unless dimensions
+            # are reset, which made FLOW expose only column A in matching.
+            candidates=[]
+            for worksheet in book.worksheets:
+                # Recalculate from actual cells for every marketplace file.
+                # A dimension can be wrong without being exactly ``A1`` and
+                # newly added channels should receive the same protection.
+                worksheet.reset_dimensions()
+                rows=list(worksheet.values)
+                width=max((len(row) for row in rows),default=0)
+                candidates.append((len(rows)*width,rows))
+            return max(candidates,key=lambda item:item[0])[1]
         finally:
             book.close()
     if raw.startswith(bytes.fromhex('D0CF11E0A1B11AE1')):

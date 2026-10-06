@@ -10,7 +10,7 @@ import ctypes
 import calendar
 import tkinter.font as tkfont
 from difflib import SequenceMatcher
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox, simpledialog
 
@@ -32,7 +32,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.8.2'
+APP_VERSION = '1.9.0'
 
 
 CHANNEL_TO_INTERNAL = {
@@ -330,6 +330,7 @@ class Desktop:
             ttk.Entry(form,textvariable=var,width=22,show='●' if secret else '').pack(side='left')
         self.button(form,'로그인 정보 보호 저장',self.save_esm_login,style='Quiet.TButton')
         self.button(form,'ESM PLUS 자동 다운로드',self.download_esm,style='Accent.TButton')
+        self.button(form,'ESM만 ERP 파일 생성',self.export_esm_erp,style='Accent.TButton')
         self.button(form,'파일 직접 추가',self.import_esm_files,style='Quiet.TButton')
         ttk.Label(esm_card,textvariable=self.esm_progress,foreground='#2563EB').pack(anchor='w',padx=8,pady=(10,0))
         esm_actions=ttk.Frame(esm_frame);esm_actions.pack(fill='x',pady=(12,8))
@@ -339,21 +340,40 @@ class Desktop:
         self.esm_entries=self.tree(esm_frame,['기준일','판매처','주문번호','상품명','옵션','수량','단가','합계','ERP 품목','상태'],[105,90,145,280,220,65,95,105,170,180])
         self.esm_entries.bind('<Double-1>',lambda _event:self.safe(self.edit_esm_set))
         ttk.Label(erp_frame,text='이카운트 ERP 파일 생성 및 다운로드',font=(self.font_family,18,'bold')).pack(anchor='w')
-        ttk.Label(erp_frame,text='2번 실제출고·스마트스토어와 2-1 옥션/지마켓의 매칭 완료 건을 한 파일에 포함합니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
+        ttk.Label(erp_frame,text='출고일 범위의 실제출고·스마트스토어 주문을 만들며, ESM 포함 여부를 선택할 수 있습니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
+        self.erp_from = tk.StringVar(value=date.today().isoformat())
         self.through = tk.StringVar(value=date.today().isoformat())
         self.voucher = tk.StringVar(value=date.today().isoformat())
+        self.erp_include_esm = tk.BooleanVar(value=True)
         erp_card = ttk.LabelFrame(erp_frame,text='출력 조건',padding=18);erp_card.pack(fill='x')
         line = ttk.Frame(erp_card); line.pack(anchor='w')
-        for label,var in [('실제 출고일 ≤',self.through),('ERP 전표일',self.voucher)]:
-            ttk.Label(line,text=label).pack(side='left',padx=6)
-            ttk.Entry(line,textvariable=var,width=12).pack(side='left')
+        ttk.Label(line,text='출고일').pack(side='left',padx=6)
+        self.date_picker(line,self.erp_from,'출고 시작일').pack(side='left')
+        ttk.Label(line,text='~').pack(side='left',padx=5)
+        self.date_picker(line,self.through,'출고 종료일').pack(side='left')
+        ttk.Label(line,text='ERP 전표일').pack(side='left',padx=(14,6))
+        self.date_picker(line,self.voucher,'ERP 전표일').pack(side='left')
+        ttk.Checkbutton(line,text='ESM 포함',variable=self.erp_include_esm).pack(side='left',padx=(14,4))
         self.button(line,'ERP 파일 생성',self.erp,style='Accent.TButton')
         ttk.Label(erp_card,text='이미 생성한 출고는 제외됩니다. 배송비는 묶음 전체 출고 완료 후 한 번 반영하며, 부가세 포함·10% 과세 기준입니다.',foreground='#64748B',wraplength=1000).pack(anchor='w',pady=(16,0))
+        self.history_day=tk.StringVar(value=date.today().isoformat())
+        self.history_show_all=True
+        history_filters=ttk.Frame(history_frame);history_filters.pack(fill='x',pady=(0,8))
+        ttk.Label(history_filters,text='출력일').pack(side='left',padx=(0,5))
+        self.date_picker(history_filters,self.history_day,'출력 이력 날짜').pack(side='left')
+        self.button(history_filters,'이전날',lambda:self.move_history_day(-1),style='Quiet.TButton')
+        self.button(history_filters,'다음날',lambda:self.move_history_day(1),style='Quiet.TButton')
+        self.button(history_filters,'선택일 조회',self.show_history_day,style='Accent.TButton')
+        self.button(history_filters,'전체 이력',self.show_all_history,style='Quiet.TButton')
         line = ttk.Frame(history_frame); line.pack(fill='x',pady=8)
         self.button(line,'선택 파일 재저장',self.reexport)
         self.button(line,'ERP 등록 확인',self.registered)
-        ttk.Label(line,text='파일 생성과 ERP 사이트 등록 완료는 별개입니다.').pack(side='left',padx=20)
-        self.history = self.tree(history_frame,['묶음 ID','종류','기준일','ERP 등록 확인'],[320,140,180,180])
+        ttk.Label(line,text='생성 파일의 주문 상세를 출력일별로 조회합니다.').pack(side='left',padx=20)
+        self.history = self.tree(
+            history_frame,
+            ['출력일(요일)','출고일','종류','판매처','주문번호','수령인','연락처','판매품목','옵션','수량','금액','등록','묶음 ID'],
+            [120,105,120,130,160,100,125,260,190,65,100,90,190],
+        )
         ttk.Label(settings_frame,text='로그인 전에는 이 PC에 저장되고, API 로그인 후에는 공유 DB와 동기화됩니다.',font=(self.font_family,16,'bold')).pack(anchor='w',pady=10)
         ttk.Label(settings_frame,text=str(service.folder),wraplength=1100).pack(anchor='w')
         ttk.Label(settings_frame,text='설정 파일에서 판매처별 헤더·계정·파일명 단서와 출력 열 이름을 변경할 수 있습니다.\n주문에 포함된 배송비는 원본의 배송비 합계를 사용합니다. 실제 거래처 규칙을 확인하세요.\nAPI 로그인 후 주문·매칭·출고·ERP 이력은 Supabase 공유 작업공간으로 동기화됩니다.\n동시에 같은 자료를 수정하면 버전 충돌로 저장을 중단하고 최신 자료를 다시 불러옵니다.',wraplength=1100).pack(anchor='w',pady=16)
@@ -1118,10 +1138,39 @@ class Desktop:
         counts={state:sum(o['state']==state for o in self.rows.values()) for state in ['검토 필요','출고 준비','출고 요청','부분 출고','출고 완료']}
         stats=self.service.match_statistics(self.rows.values())
         self.summary.set(f"자동 매칭 {stats['ready']:,}/{stats['total']:,}건 ({stats['rate']}%)   "+'   '.join(f'{key}  {value:,}건' for key,value in counts.items()))
+        self.refresh_history()
+
+    def refresh_history(self):
+        if not hasattr(self,'history'):return
         self.history.delete(*self.history.get_children())
-        for a in self.service.artifacts():
-            self.history.insert('', 'end',iid=a['id'],values=[a['id'],a['kind'],a['day'],'확인 완료' if a['registered'] else '—'])
+        selected_day=None if self.history_show_all else self.history_day.get()
+        self.history_artifacts={}
+        weekdays=('월','화','수','목','금','토','일')
+        for row in self.service.artifact_history_rows(selected_day):
+            try:day_label=f"{row['artifact_day']} ({weekdays[date.fromisoformat(row['artifact_day']).weekday()]})"
+            except ValueError:day_label=row['artifact_day']
+            iid=row['row_id']
+            self.history_artifacts[iid]=row['artifact_id']
+            channel=INTERNAL_TO_CHANNEL.get(row['channel'],row['channel']).removeprefix('리큐엠_')
+            try:amount=f"{int(Decimal(row['amount'])):,}"
+            except Exception:amount=row['amount']
+            self.history.insert('', 'end',iid=iid,values=[
+                day_label,row['source_day'],row['source'],channel,row['order_no'],row['recipient'],row['phone'],
+                row['product'],row['option'],row['quantity'],amount,'확인 완료' if row['registered'] else '—',row['artifact_id'],
+            ])
         self.root.after_idle(lambda:autosize_tree(self.history,maximum=360))
+
+    def move_history_day(self, delta):
+        current=date.fromisoformat(self.history_day.get())
+        self.history_day.set((current+timedelta(days=delta)).isoformat())
+        self.history_show_all=False;self.refresh_history()
+
+    def show_history_day(self):
+        date.fromisoformat(self.history_day.get())
+        self.history_show_all=False;self.refresh_history()
+
+    def show_all_history(self):
+        self.history_show_all=True;self.refresh_history()
 
     def selected(self,tree):
         ids=tree.selection()
@@ -1656,6 +1705,16 @@ class Desktop:
         self.esm_progress.set('자동 다운로드 실패 · 파일 직접 추가도 사용할 수 있습니다.')
         messagebox.showerror('ESM 자동 다운로드 확인',detail,parent=self.root)
 
+    def export_esm_erp(self):
+        start=date.fromisoformat(self.esm_start_day.get()).isoformat()
+        end=date.fromisoformat(self.esm_end_day.get()).isoformat()
+        if start>end:raise ValueError('시작 주문일은 종료 주문일보다 늦을 수 없습니다.')
+        path=self.save_path(f'ESM_ERP_{start}_{end}.xlsx')
+        if path:
+            self.service.export_erp(end,end,path,from_day=start,only_esm=True)
+            self.refresh()
+            messagebox.showinfo('ESM ERP 파일 생성','선택 기간의 옥션·지마켓 주문만 ERP 파일로 저장했습니다.',parent=self.root)
+
     def refresh_esm_entries(self):
         if not hasattr(self,'esm_entries'):return
         self.esm_entries.delete(*self.esm_entries.get_children())
@@ -1807,15 +1866,18 @@ class Desktop:
     def erp(self):
         path=self.save_path('ERP_'+self.voucher.get()+'.xlsx')
         if path:
-            self.service.export_erp(self.voucher.get(),self.through.get(),path);self.refresh()
+            self.service.export_erp(
+                self.voucher.get(),self.through.get(),path,
+                from_day=self.erp_from.get(),include_esm=self.erp_include_esm.get(),
+            );self.refresh()
             messagebox.showinfo('ERP 파일 생성','ERP 파일을 저장했습니다. 사이트 등록 후 출력 이력에서 등록 확인을 표시하세요.')
 
     def reexport(self):
-        key=self.selected(self.history)[0];path=self.save_path(key+'.xlsx')
+        row_id=self.selected(self.history)[0];key=self.history_artifacts[row_id];path=self.save_path(key+'.xlsx')
         if path:self.service.reexport(key,path)
 
     def registered(self):
-        key=self.selected(self.history)[0]
+        row_id=self.selected(self.history)[0];key=self.history_artifacts[row_id]
         if messagebox.askyesno('ERP 등록 확인','ERP 사이트에 해당 파일을 정상 등록했습니까?'):
             self.service.mark_registered(key);self.refresh()
 

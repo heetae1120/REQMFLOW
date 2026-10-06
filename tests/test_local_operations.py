@@ -1,15 +1,17 @@
 import io
 import json
+import re
 import sqlite3
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from openpyxl import load_workbook
 from reqm_local.files import (
     DEFAULT_SETTINGS, RESULT_COLUMNS, WEKEEP_REQUEST_COLUMNS, analyze_order_columns,
     choice_column_index, column_choice, filename_signature, parse_orders,
-    profile_column_choices, related_column_choices, sample_header_names,
+    profile_column_choices, read_rows, related_column_choices, sample_header_names,
     settings_at, workbook_bytes,
 )
 from reqm_local.service import Operations
@@ -37,6 +39,20 @@ class LocalTests(unittest.TestCase):
         weeks=calendar_month_days(2026,10)
         self.assertEqual(weeks[0],[0,0,0,0,1,2,3])
         self.assertEqual([day for week in weeks for day in week if day],list(range(1,32)))
+
+    def test_xlsx_with_broken_a1_dimension_still_exposes_every_header(self):
+        source=workbook_bytes(['주문번호','상품명','수량'],[['O1','상품',2]])
+        incoming=io.BytesIO(source);outgoing=io.BytesIO()
+        with zipfile.ZipFile(incoming) as original, zipfile.ZipFile(outgoing,'w') as repaired:
+            for name in original.namelist():
+                content=original.read(name)
+                if name=='xl/worksheets/sheet1.xml':
+                    content=re.sub(br'<dimension ref="[^"]+"',b'<dimension ref="A1"',content)
+                repaired.writestr(name,content)
+        path=self.folder/'zigzag-broken-dimension.xlsx';path.write_bytes(outgoing.getvalue())
+        rows=read_rows(path)
+        self.assertEqual(rows[0],('주문번호','상품명','수량'))
+        self.assertEqual(rows[1],('O1','상품',2))
 
     def test_related_search_suggestions_include_direct_and_synonym_terms(self):
         suggestions=search_suggestions('전화',['010-1234-5678','서울 배송지','모트모트 상품'])
@@ -186,6 +202,24 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(total,13001)
         self.s.mark_registered(batch);self.s.reexport(batch,self.folder/'again.xlsx')
         self.assertEqual((self.folder/'again.xlsx').read_bytes(),(self.folder/'second.xlsx').read_bytes())
+
+    def test_erp_export_filters_an_explicit_shipping_date_range(self):
+        _,first=self.import_order(line='D1',amount=1000,fee=0,bundle='D1')
+        first_line=self.request(first);self.result(first_line,3,'DAY-1','2026-10-01')
+        _,second=self.import_order(line='D2',amount=2000,fee=0,bundle='D2')
+        second_line=self.request(second);self.result(second_line,3,'DAY-2','2026-10-02')
+        target=self.folder/'range.xlsx'
+        batch=self.s.export_erp(
+            '2026-10-06','2026-10-02',target,from_day='2026-10-02',include_esm=False,
+        )
+        shipments=self.s.db.execute('SELECT day,erp_id FROM shipments ORDER BY day').fetchall()
+        self.assertEqual([(row['day'],row['erp_id']) for row in shipments],[
+            ('2026-10-01',None),('2026-10-02',batch),
+        ])
+        history=self.s.artifact_history_rows('2026-10-06')
+        self.assertEqual([(row['source_day'],row['order_no'],row['recipient']) for row in history if row['artifact_id']==batch],[
+            ('2026-10-02','O1','가상수령인'),
+        ])
 
     def test_actual_shipment_amount_can_be_rematched_before_erp_export(self):
         _,order=self.import_order(amount=10000,fee=0)
@@ -443,10 +477,20 @@ class LocalTests(unittest.TestCase):
                  unit_amount=0,warehouse='300',customer='AC008798'),
         ])
         target=self.folder/'esm-erp.xlsx'
-        self.s.export_erp('2026-10-06','2026-10-06',target)
+        with self.assertRaisesRegex(ValueError,'미반영 주문'):
+            self.s.export_erp('2026-10-06','2026-10-06',target,include_esm=False)
+        batch=self.s.export_erp(
+            '2026-10-06','2026-10-06',target,
+            from_day='2026-10-06',only_esm=True,
+        )
         book=load_workbook(target,data_only=True);rows=list(book.active.values)[1:];book.close()
         self.assertEqual(sum(row[15]*row[16] for row in rows),20000)
         self.assertEqual(self.s.esm_erp_entries()[0]['erp_id'] is not None,True)
+        self.assertEqual(next(row for row in self.s.artifacts() if row['id']==batch)['kind'],'ESM ERP')
+        history=self.s.artifact_history_rows('2026-10-06')
+        self.assertEqual([(row['source'],row['channel'],row['order_no'],row['amount']) for row in history],[
+            ('ESM ERP','지마켓','G-ORDER','20000'),
+        ])
 
     def test_explicit_address_columns_are_joined_with_one_space(self):
         profile = {

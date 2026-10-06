@@ -1153,18 +1153,29 @@ class Operations:
             self.settings.setdefault('channel_customer_codes',{})[channel] = customer
             self._write_settings()
 
-    def export_erp(self, on, through, path):
+    def export_erp(self, on, through, path, from_day=None, include_esm=True, only_esm=False):
         on, through = day(on), day(through)
+        from_day = day(from_day) if from_day else '0001-01-01'
+        if from_day > through:
+            raise ValueError('출고 시작일은 종료일보다 늦을 수 없습니다.')
         batch = 'E-' + uuid.uuid4().hex[:12]
         pending = self.db.execute('''SELECT s.*, r.order_id, r.component FROM shipments s
-            JOIN request_lines r ON s.line_id=r.id WHERE s.erp_id IS NULL AND s.day<=? ORDER BY s.day,s.rowid''', (through,)).fetchall()
+            JOIN request_lines r ON s.line_id=r.id
+            WHERE s.erp_id IS NULL AND s.day>=? AND s.day<=? ORDER BY s.day,s.rowid''',
+            (from_day,through)).fetchall()
         orders = {o['id']:o for o in self.orders()}
         if self.smartstore_erp_enabled():
             pending = [shipment for shipment in pending if not is_smartstore_channel(orders[shipment['order_id']]['data'].get('channel'))]
-        smart_rows=self.db.execute('SELECT * FROM smartstore_erp_rows WHERE erp_id IS NULL AND day<=? ORDER BY day,rowid',(through,)).fetchall()
-        esm_rows=self.db.execute('SELECT * FROM esm_erp_rows WHERE erp_id IS NULL AND day<=? ORDER BY day,rowid',(through,)).fetchall()
+        smart_rows=self.db.execute('''SELECT * FROM smartstore_erp_rows
+            WHERE erp_id IS NULL AND day>=? AND day<=? ORDER BY day,rowid''',(from_day,through)).fetchall()
+        esm_rows=self.db.execute('''SELECT * FROM esm_erp_rows
+            WHERE erp_id IS NULL AND day>=? AND day<=? ORDER BY day,rowid''',(from_day,through)).fetchall()
+        if only_esm:
+            pending,smart_rows=[],[]
+        elif not include_esm:
+            esm_rows=[]
         if not pending and not smart_rows and not esm_rows:
-            raise ValueError('선택한 날짜까지 ERP 파일에 반영하지 않은 실제 출고가 없습니다.')
+            raise ValueError('선택한 출고일 범위에 ERP 파일로 만들 미반영 주문이 없습니다.')
         unmatched = [shipment for shipment in pending if shipment['erp_amount'] in (None,'')]
         if unmatched:
             raise ValueError(f'ERP 금액 매칭이 필요한 실제 출고가 {len(unmatched):,}건 있습니다.')
@@ -1205,9 +1216,13 @@ class Operations:
                 for component in json.loads(esm_row['components']):
                     append(component,quantity(component['quantity']),number(component['amount']))
                 self.db.execute('UPDATE esm_erp_rows SET erp_id=? WHERE id=?',(batch,esm_row['id']))
+            included_order_ids={shipment['order_id'] for shipment in pending}
+            included_bundles={self.bundle_key(orders[order_id]['data']) for order_id in included_order_ids}
             groups = {}
             for order in orders.values():
-                groups.setdefault(self.bundle_key(order['data']),[]).append(order)
+                bundle=self.bundle_key(order['data'])
+                if bundle in included_bundles:
+                    groups.setdefault(bundle,[]).append(order)
             for bundle, group in groups.items():
                 if self.smartstore_erp_enabled() and any(is_smartstore_channel(order['data'].get('channel')) for order in group):
                     continue
@@ -1227,12 +1242,62 @@ class Operations:
                 self.db.execute('INSERT INTO fees VALUES(?,?)',(bundle,batch))
             rows.sort(key=lambda row: (0 if row[5] == 100 else 1))
             headers = ['일자','순번','거래처코드','거래처명','담당자','출하창고','거래유형','통화','환율','계좌번호','미수금','특이사항','품목코드','품목명','규격','수량','단가','외화금액','공급가액','부가세','비고','생산전표생성']
-            self._artifact(batch,'ERP',on,workbook_bytes(headers,rows,'이카운트 웹입력'),path)
-            self.event('ERP 파일 생성',batch)
+            kind='ESM ERP' if only_esm else 'ERP'
+            self._artifact(batch,kind,on,workbook_bytes(headers,rows,'이카운트 웹입력'),path)
+            self.event(f'{kind} 파일 생성',batch)
         return batch
 
     def artifacts(self):
         return [dict(r) for r in self.db.execute('SELECT id,kind,day,registered FROM artifacts ORDER BY rowid DESC')]
+
+    def artifact_history_rows(self, on=None):
+        """Return database-style order details for generated files on one voucher day."""
+        params=()
+        where=''
+        if on:
+            where='WHERE day=?';params=(day(on),)
+        artifacts=self.db.execute(
+            f'SELECT id,kind,day,registered FROM artifacts {where} ORDER BY rowid DESC',params
+        ).fetchall()
+        orders={row['id']:row for row in self.orders()}
+        result=[]
+
+        def add(artifact,source,source_day,data,qty,amount,row_id):
+            result.append({
+                'row_id':f"{artifact['id']}:{source}:{row_id}",
+                'artifact_id':artifact['id'],'artifact_day':artifact['day'],
+                'kind':artifact['kind'],'source':source,'source_day':source_day,
+                'channel':data.get('channel',''),'order_no':data.get('order_no',''),
+                'recipient':data.get('recipient',''),'phone':data.get('phone',''),
+                'product':data.get('product',''),'option':data.get('option',''),
+                'quantity':str(qty or ''),'amount':str(amount or '0'),
+                'registered':bool(artifact['registered']),
+            })
+
+        for artifact in artifacts:
+            if artifact['kind']=='출고요청':
+                lines=self.db.execute(
+                    'SELECT * FROM request_lines WHERE request_id=? ORDER BY rowid',(artifact['id'],)
+                ).fetchall()
+                for line in lines:
+                    order=orders.get(line['order_id'])
+                    if not order:continue
+                    components=order['components'];index=line['component']
+                    component=components[index] if 0<=index<len(components) else {}
+                    add(artifact,'출고요청',artifact['day'],order['data'],line['qty'],component.get('amount','0'),line['id'])
+                continue
+            shipments=self.db.execute('''SELECT s.*,r.order_id,r.component FROM shipments s
+                JOIN request_lines r ON s.line_id=r.id WHERE s.erp_id=? ORDER BY s.day,s.rowid''',
+                (artifact['id'],)).fetchall()
+            for shipment in shipments:
+                order=orders.get(shipment['order_id'])
+                if order:
+                    add(artifact,'일반 ERP',shipment['day'],order['data'],shipment['qty'],shipment['erp_amount'],shipment['id'])
+            for table,source in (('smartstore_erp_rows','스마트스토어 ERP'),('esm_erp_rows','ESM ERP')):
+                for row in self.db.execute(f'SELECT * FROM {table} WHERE erp_id=? ORDER BY day,rowid',(artifact['id'],)).fetchall():
+                    data=json.loads(row['data'])
+                    add(artifact,source,row['day'],data,data.get('quantity',''),data.get('amount','0'),row['id'])
+        return result
 
     def reexport(self, artifact_id, path):
         row = self.db.execute('SELECT content FROM artifacts WHERE id=?',(artifact_id,)).fetchone()
@@ -1242,7 +1307,7 @@ class Operations:
 
     def mark_registered(self, artifact_id):
         with self.db:
-            if not self.db.execute("SELECT 1 FROM artifacts WHERE id=? AND kind='ERP'",(artifact_id,)).fetchone():
+            if not self.db.execute("SELECT 1 FROM artifacts WHERE id=? AND kind IN ('ERP','ESM ERP')",(artifact_id,)).fetchone():
                 raise ValueError('ERP 파일 이력을 선택하세요.')
             self.db.execute('UPDATE artifacts SET registered=1 WHERE id=?',(artifact_id,))
             self.event('ERP 등록 확인',artifact_id)
