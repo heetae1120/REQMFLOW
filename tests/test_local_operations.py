@@ -17,6 +17,7 @@ from reqm_local.shipping import ShippingCatalog, compact
 from reqm_local.ui_helpers import filter_combobox_choices, search_suggestions
 from reqm_local.workspace_cloud import export_workspace, import_workspace, workspace_digest
 from reqm_local.updater import RELEASE_API, prepare_update, version_tuple
+from reqm_local.desktop import FIELD_LABELS, MAPPING_FIELD_ORDER
 
 REFERENCE=Path(__file__).resolve().parents[1]/'supabase/ecount_migration/data'
 HEADERS=['주문번호','상품주문번호','상품명','옵션정보','수량','최종 상품별 총 주문금액','수취인명','수취인연락처1','우편번호','통합배송지','배송비 묶음번호','배송비 합계','주문상태','결제일']
@@ -333,6 +334,29 @@ class LocalTests(unittest.TestCase):
         book=load_workbook(self.folder/'wekeep-address.xlsx',data_only=True)
         self.assertEqual(book['택배출고']['H2'].value,'강원 원주시 가곡로 50 1006동 703호 (원주롯데캐슬더퍼스트)')
         book.close()
+
+    def test_mapping_fields_have_fixed_requested_order(self):
+        self.assertEqual([FIELD_LABELS[field] for field in MAPPING_FIELD_ORDER], [
+            '주문일자', '판매처주문번호', '상품주문번호', '상품명', '옵션', '수량', '금액', '배송비',
+            '수령인', '전화번호', '우편번호', '주소 1', '주소 2', '배송메모',
+        ])
+
+    def test_explicit_address_columns_are_joined_with_one_space(self):
+        profile = {
+            'name':'테스트몰', 'channel':'테스트몰', 'filename_hints':['address-parts'],
+            'required':[], 'header_row':1, 'enabled':True,
+            'columns':{
+                'order_no':['주문번호'], 'line_no':['상품주문번호'], 'product':['상품명'],
+                'quantity':['수량'], 'address1':['주소 앞부분'], 'address2':['상세 위치'],
+            },
+        }
+        path=self.folder/'address-parts.xlsx'
+        path.write_bytes(workbook_bytes(
+            ['주문번호','상품주문번호','상품명','수량','주소 앞부분','상세 위치'],
+            [['O1','L1','테스트상품',1,' 강원 원주시  가곡로 50 ','1006동 703호  ']],
+        ))
+        parsed=parse_orders(path,[profile])[0]
+        self.assertEqual(parsed['address'],'강원 원주시 가곡로 50 1006동 703호')
 
     def test_existing_settings_disable_required_fields(self):
         folder=self.folder/'settings-only';folder.mkdir()
