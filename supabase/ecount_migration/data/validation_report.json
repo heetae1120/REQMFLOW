@@ -3,7 +3,7 @@
   "source_file": "C:/Users/82104/OneDrive/Desktop/위킵_이카운트_양식 추가.xlsx",
   "generated_at": "2026-07-30T01:34:51.602Z",
   "counts": {
-    "ecount_item_reference.csv": 283,
+    "ecount_item_reference.csv": 389,
     "ecount_item_aliases.csv": 533,
     "ecount_sales_channels.csv": 105,
     "ecount_product_mappings.csv": 772,
@@ -38,6 +38,9 @@
     "new_price_rules": 232,
     "duplicate_price_rules_skipped": 6,
     "duplicated_source_blocks_deduplicated": 2,
-    "duplicate_product_mappings_skipped": 1
+    "duplicate_product_mappings_skipped": 1,
+    "item_master_source": "ESZ018R.xlsx",
+    "item_master_added": 106,
+    "item_master_synced_at": "2026-10-06"
   }
 }

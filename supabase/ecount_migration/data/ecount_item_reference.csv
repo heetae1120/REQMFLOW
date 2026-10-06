@@ -1,4 +1,4 @@
-﻿item_code,representative_name,alias_count,first_source_row,review_status,is_active
+item_code,representative_name,alias_count,first_source_row,review_status,is_active
 [REQM]-QP10B,QP10B,1,300,confirmed,true
 [REQM]-QP20B,QP20B,1,301,confirmed,true
 [RQM]-QM1000SWH-C,QM1000S,1,122,confirmed,true
@@ -282,3 +282,109 @@ WS-Small-Green,애플워치스트랩 뱀부/그린 S,2,165,confirmed,true
 WS-Small-Ivory,애플워치스트랩 아이보리 S,2,167,confirmed,true
 WS-Small-Skygrey,애플워치 스트랩 스몰 그레이,1,169,confirmed,true
 WS-Small-Yellow,애플워치 스트랩 스몰 옐로우,2,171,confirmed,true
+ACONE-Sliconpad_BK,ACONE-실리콘패드_블랙,0,2,confirmed,true
+ACONE-Sliconpad_CL,ACONE-실리콘패드_클라우드,0,3,confirmed,true
+ACONE-Sliconpad_CO,ACONE-실리콘패드_코랄,0,4,confirmed,true
+ACONE-Sliconpad_MU,ACONE-실리콘패드_머스타드,0,5,confirmed,true
+ACONE-Sliconpad_RD,ACONE-실리콘패드_레드,0,6,confirmed,true
+CASE-QP1000-Cl-kyobo,QP1000 실리콘 케이스_투명_교보용,0,8,confirmed,true
+CASE-QP2000-Cl-kyobo,QP2000 실리콘 케이스_투명_교보용,0,28,confirmed,true
+CAVE_Keyring,쇼룸 키링 판매 코드,0,48,confirmed,true
+GOOUTstciker_CAMPING,GOOUT스티커_CAMPING,0,49,confirmed,true
+GOOUTstciker_SPORTS,GOOUT스티커_SPORTS,0,50,confirmed,true
+PETS2-Q10S,[리펫 2] Q10S,0,54,confirmed,true
+PKG-ACONE_MB,패키지-ACONE_모닝브리즈,0,55,confirmed,true
+PKG-ACONE_MS,패키지-ACONE_미드나잇 섀도우,0,56,confirmed,true
+PKG-ACONE_SS,패키지-ACONE_선셋,0,57,confirmed,true
+PKG-ACONE_WL,패키지-ACONE_원더랜드,0,58,confirmed,true
+PKG-C258,C258 젠더 패키지 (국내제작),0,59,confirmed,true
+PKG-Cardwallet,패키지-Cardwallet,0,60,confirmed,true
+PKG-P100-SNAIL,PKG-P100-SNAIL(스네일) 패키지,0,61,confirmed,true
+PKG-P100-시바,PKG-P100-시바(시로앤마로) 패키지,0,62,confirmed,true
+PKG-Q5-REPET(KR),리펫 Q5 패키지 (국내제작),0,63,confirmed,true
+PKG-Q5-boom,Q5 패키지(boom),0,64,confirmed,true
+PKG-QC1000-RQM,PKG-QC1000 리큐엠 패키지 (국내제작),0,65,confirmed,true
+PKG-QC1000-시바,PKG-QC1000-시바(시로앤마로) 패키지,0,66,confirmed,true
+PKG-QC30-QPD220,패키지 - QPD220 가정용충전기,0,67,confirmed,true
+PKG-QC500-KR,QC500 패키지 (국내제작),0,68,confirmed,true
+PKG-QC500-시바,PKG-QC500-시바(시로앤마로) 패키지,0,69,confirmed,true
+PKG-QM1000S-8P,QM1000S 8핀 풀패키지,0,70,confirmed,true
+PKG-QM1000S-C(KR),QM1000S C타입 패키지 (국내제작) [패키지],0,71,confirmed,true
+PKG-QM500S-8Pin-KR,QM500S 8핀 패키지 (국내제작),0,72,confirmed,true
+PKG-QM500S-C-KR,QM500S C타입 패키지(국내제작),0,73,confirmed,true
+PKG-QM500S-HOZO(KR),호조 QM500S 패키지(국내제작),0,74,confirmed,true
+PKG-QP2000OEM,패키지-QP2000OEM,0,75,confirmed,true
+PKG-QWC-P100,PKG-QWC-P100 패키지,0,76,confirmed,true
+PKG-QWC-P100BK,PKG-QWC-P100 블랙 패키지,0,77,confirmed,true
+PKG-QWCB1500-BK,무선충전기 B1500 패키지-블랙,0,78,confirmed,true
+PKG-QWCB1500-WH,무선충전기 B1500 패키지-화이트,0,79,confirmed,true
+PKG-QX10-KR,QX10 패키지(국내제작),0,80,confirmed,true
+PKG-QX10PD-KR,QX10PD 패키지 (국내제작),0,81,confirmed,true
+PKG-SilRing,패키지-SilRing,0,82,confirmed,true
+PKG-TC-QC30-CT,QC3000(QC3.0) C타입 가정용분리형충전기 패키지,0,83,confirmed,true
+PKG-에스더버니QC1000,에스더버니 QC1000 패키지,0,84,confirmed,true
+PKG-에스더버니QC500,에스더버니 QC500 패키지,0,85,confirmed,true
+PKGBox-Rug,패키지박스-Rug,0,86,confirmed,true
+Panel_QWC-Q3100-NOLG,무선충전기 Q3100 앞판-NO LOGO,0,93,confirmed,true
+Parts-ACONE_MB,부품-ACONE_모닝브리즈,0,94,confirmed,true
+Parts-ACONE_MS,부품-ACONE_미드나잇 섀도우,0,95,confirmed,true
+Parts-ACONE_WL,부품-ACONE_원더랜드,0,96,confirmed,true
+QA-Jibbitz_GOOUT,리큐엠 액세서리-지비츠_GO OUT,0,103,confirmed,true
+QA-Jibbitz_SPORTS,리큐엠 액세서리-지비츠_SPORTS,0,104,confirmed,true
+QA-KeyRing_E,리큐엠 액세서리-키링_E,0,106,confirmed,true
+QA-Rug_SYMBOL-B_BL,리큐엠 액세서리-Rug_SYMBOL-B_블루,0,121,confirmed,true
+QC30-QPD365,[리큐엠] QPD365 3포트 60W PD 가정용 충전기 Ga.N,0,127,confirmed,true
+QCB-CC150K_GY,리큐엠 케이블-CC150K_그레이,0,128,confirmed,true
+QGB01-BK,[리큐엠] 짐벌 셀피 스틱 QGB01-BK,0,139,confirmed,true
+QGB01-WH,[리큐엠] 짐벌 셀피 스틱 QGB01-WH,0,140,confirmed,true
+QM4100-DIFUNG-SP,QM4100 Difung 부품 세트 1,0,141,confirmed,true
+QM4100-DIFUNG-SP2,QM4100 Difung 부품 세트 2(MAGNET),0,142,confirmed,true
+QM4100-HDSCOST,QM4100-에이치디에스 생산비,0,143,confirmed,true
+QM4100-Manual,QM4100-매뉴얼,0,144,confirmed,true
+QM4100-PACKAGEBOX-GR,QM4100 패키지 박스-그레이,0,145,confirmed,true
+QM4100-PACKAGEBOX-WH,QM4100 패키지 박스-화이트,0,146,confirmed,true
+QM4100-PCB,QM4100-PCB부품,0,147,confirmed,true
+QM4100-SP3,QM4100 부품-Clevis pin with retaining ring groove,0,148,confirmed,true
+QM4100-SP4,QM4100 부품-Spring load ball plunger,0,149,confirmed,true
+QM4100-SP5-Pad-BK,QM4100 부품-바닥패드-블랙,0,150,confirmed,true
+QM4100-SP5-Pad-GR,QM4100 부품-바닥패드-그레이,0,151,confirmed,true
+QMA-Cardholder,리큐엠 맥세이프 액세서리-카드홀더,0,158,confirmed,true
+QMH100WH,QMH100 [리큐엠] 무드링 가습기 화이트,0,183,confirmed,true
+QMS01Remote_BK,맥세이프셀카봉QMS01리모컨_블랙,0,185,confirmed,true
+QPD-365NP_GY,리큐엠 가정용 충전기 65W-QPD365P_그레이,0,196,confirmed,true
+QQU-TWS-BK,QQU 무선이어폰 블랙,0,199,confirmed,true
+QQU-TWS-CASE,무선이어폰(QQU) 케이스,0,200,confirmed,true
+QWC-A1000-BK,무선충전기 QWC-A1000-BK,0,205,confirmed,true
+QWC-A1000-WH,무선충전기 QWC-A1000-WH,0,206,confirmed,true
+QWC-A1500-WH,무선충전기 QWC-A1500-WH,0,207,confirmed,true
+QWC-A700,무선충전기 QWC-A700,0,209,confirmed,true
+QWC-A800,무선충전기 QWC-A800,0,210,confirmed,true
+QWC-A900,무선충전기 QWC-A900,0,211,confirmed,true
+QWC-B1500-M,QWC-B1500 메뉴얼,0,213,confirmed,true
+QWC-B1500-WH,[리큐엠] 무선충전기 QWC-B1500 화이트,0,214,confirmed,true
+QWC-CW330,[리큐엠] QWC-CW330 차량용 무선충전기 블랙,0,215,confirmed,true
+QWC-CW380,[리큐엠] QWC-CW380 차량용 와이드 무선충전기 블랙,0,216,confirmed,true
+QWC-D1505-BK,[리큐엠] 무선충전기 듀오 QWC-D1505 블랙,0,218,confirmed,true
+QWC-D1505-WH,[리큐엠] 무선충전기 듀오 QWC-D1505 화이트,0,219,confirmed,true
+QWC-L1500-BK,[리큐엠] QWC-L1500-BK 무선충전기 블랙,0,220,confirmed,true
+QWC-L1500-WH,[리큐엠] QWC-L1500-WH 무선충전기 화이트,0,221,confirmed,true
+QWC-P100-BK,[리큐엠] QWC-P100 무선충전기 블랙,0,224,confirmed,true
+QWC-P100-WH,[리큐엠] QWC-P100 무선충전기 화이트,0,225,confirmed,true
+QWC-P1500-BK,[리큐엠] QWC-P1500 무선충전기 블랙,0,228,confirmed,true
+QWC-P1500-WH,[리큐엠] QWC-P1500 무선충전기 화이트,0,229,confirmed,true
+QWC-Q1000BK,[리큐엠] QWC-Q1000 무선충전기 블랙,0,230,confirmed,true
+QWC-Q1500-GR-PM,[리큐엠] QWC-Q1500 무선충전기 그레이-판촉용,0,231,confirmed,true
+QWC-Q1500-WH-PM,[리큐엠] QWC-Q1500 무선충전기 화이트-판촉용,0,232,confirmed,true
+RQM-Q10S-M(KR),Q10S 메뉴얼 (국내제작),0,242,confirmed,true
+RQM-Q10SA8,[리큐엠] Q10S + 8핀젠더,0,243,confirmed,true
+RQM-QST01M-BK,[리큐엠] 미니셀카봉 QST01M 블랙,0,244,confirmed,true
+RQM-QST01M-WH,[리큐엠] 미니셀카봉 QST01M 화이트,0,245,confirmed,true
+RQM-QWP1100+Dock_BK,[리큐엠] 무선충전 보조배터리 QWP1100+Dock 블랙,0,246,confirmed,true
+RQM-QWP1100-WH,[리큐엠] 무선충전 보조배터리 QWP1100 화이트,0,247,confirmed,true
+SP-AC50-공용8핀,"[SOMOON]5,000mAh 일체형 보조배터리(공용)_AC50",0,254,confirmed,true
+Sticker-Rug,스티커-Rug,0,260,confirmed,true
+VELVETPOUCH,벨벳 파우치,0,268,confirmed,true
+[RQM]-QP2000A-BK,[리큐엠] QP2000A 블랙 (18W),0,280,confirmed,true
+[RQM]-QP2000A-WH,[리큐엠] QP2000A 화이트 (18W),0,283,confirmed,true
+[RQM]QP2000A(CP)-BK,[리큐엠] QP2000A(CP) 블랙,0,290,confirmed,true
+[RQM]QP2000A(CP)-WH,[리큐엠] QP2000A(CP) 화이트,0,291,confirmed,true
