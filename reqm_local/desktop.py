@@ -30,7 +30,7 @@ from .column_matching import match_columns
 from .shipping import compact, channel_key
 
 
-APP_VERSION = '1.6.9'
+APP_VERSION = '1.6.10'
 
 
 CHANNEL_TO_INTERNAL = {
@@ -39,16 +39,21 @@ CHANNEL_TO_INTERNAL = {
 INTERNAL_TO_CHANNEL = {value: key for key, value in CHANNEL_TO_INTERNAL.items()}
 
 FIELD_LABELS = {
-    'order_no': '판매처 주문번호', 'line_no': '상품주문번호',
+    'order_no': '판매처주문번호', 'line_no': '상품주문번호',
     'source_item_code': '판매처 상품코드',
-    'product': '판매처 상품명', 'option': '상품 옵션',
-    'quantity': '수량', 'amount': '결제 금액',
+    'product': '상품명', 'option': '옵션',
+    'quantity': '수량', 'amount': '금액',
     'recipient': '수령인', 'phone': '전화번호',
     'postcode': '우편번호', 'address': '주소',
-    'memo': '배송 메모', 'paid_at': '주문 일자',
+    'address1': '주소 1', 'address2': '주소 2',
+    'memo': '배송메모', 'paid_at': '주문일자',
     'status': '주문 상태', 'bundle': '배송비 묶음번호',
     'shipping': '배송비',
 }
+MAPPING_FIELD_ORDER = (
+    'paid_at', 'order_no', 'line_no', 'product', 'option', 'quantity', 'amount', 'shipping',
+    'recipient', 'phone', 'postcode', 'address1', 'address2', 'memo',
+)
 SUGGESTED_MAPPING_FIELDS = ('order_no', 'line_no', 'product', 'quantity', 'amount')
 FONT_FAMILY = 'Pretendard'
 EMPTY_COLUMN_CHOICES = ['미사용']
@@ -671,36 +676,30 @@ class Desktop:
 
         mapping = ttk.LabelFrame(right,text='02  주문 파일 열 연결',padding=13)
         mapping.pack(fill='both',expand=True,pady=(14,0))
-        for block in range(3):
-            ttk.Label(mapping,text='프로그램 항목',font=(self.font_family,9,'bold'),foreground='#64748B').grid(row=0,column=block*3,sticky='w',padx=((0 if block == 0 else 24),8))
-            ttk.Label(mapping,text='엑셀 열 이름',font=(self.font_family,9,'bold'),foreground='#64748B').grid(row=0,column=block*3+1,sticky='w')
-            ttk.Label(mapping,text='판정',font=(self.font_family,9,'bold'),foreground='#64748B').grid(row=0,column=block*3+2,sticky='w',padx=(6,0))
+        ttk.Label(mapping,text='프로그램 항목',font=(self.font_family,9,'bold'),foreground='#64748B').grid(row=0,column=0,sticky='w',padx=(0,8))
+        ttk.Label(mapping,text='엑셀 열 이름',font=(self.font_family,9,'bold'),foreground='#64748B').grid(row=0,column=1,sticky='w')
+        ttk.Label(mapping,text='판정',font=(self.font_family,9,'bold'),foreground='#64748B').grid(row=0,column=2,sticky='w',padx=(6,0))
         self.mapping_vars = {}
         self.mapping_boxes = {}
         self.mapping_status_vars = {}
-        fields = list(FIELD_LABELS)
-        split = (len(fields)+2)//3
-        for index, field in enumerate(fields):
-            block = index//split
-            row = index%split+1
-            label_col, input_col = block*3, block*3+1
-            ttk.Label(mapping,text=FIELD_LABELS[field]).grid(row=row,column=label_col,sticky='w',padx=((0 if block == 0 else 24),8),pady=5)
+        for index, field in enumerate(MAPPING_FIELD_ORDER):
+            row = index+1
+            ttk.Label(mapping,text=FIELD_LABELS[field]).grid(row=row,column=0,sticky='w',padx=(0,8),pady=4)
             variable = tk.StringVar(value='미사용')
-            box = ttk.Combobox(mapping,textvariable=variable,values=related_column_choices(field,EMPTY_COLUMN_CHOICES),width=32)
-            box.grid(row=row,column=input_col,sticky='ew',pady=5)
+            box = ttk.Combobox(mapping,textvariable=variable,values=related_column_choices(field,EMPTY_COLUMN_CHOICES),width=48)
+            box.grid(row=row,column=1,sticky='ew',pady=4)
             box.bind('<FocusIn>',lambda event,current=field:self.prepare_mapping_search(current,event.widget))
             box.bind('<KeyRelease>',lambda event,current=field:self.search_mapping_choices(current,event.widget,event))
             box.bind('<Double-1>',self.select_all_text)
             bind_wide_combobox(box)
             status=tk.StringVar(value='저장값')
-            ttk.Label(mapping,textvariable=status,foreground='#64748B',width=6).grid(row=row,column=input_col+1,sticky='w',padx=(6,0))
+            ttk.Label(mapping,textvariable=status,foreground='#64748B',width=6).grid(row=row,column=2,sticky='w',padx=(6,0))
             self.mapping_vars[field] = variable
             self.mapping_boxes[field] = box
             self.mapping_status_vars[field] = status
-        for input_column in (1,4,7):
-            mapping.columnconfigure(input_column,weight=1)
+        mapping.columnconfigure(1,weight=1)
         footer = ttk.Frame(mapping)
-        footer.grid(row=split+2,column=0,columnspan=9,sticky='ew',pady=(15,0))
+        footer.grid(row=len(MAPPING_FIELD_ORDER)+2,column=0,columnspan=3,sticky='ew',pady=(12,0))
         ttk.Label(footer,text='필수 항목 없음 · 같은 열을 여러 항목에 선택 가능 · 입력하면 관련 열을 검색',foreground='#DB2777').pack(side='left')
         ttk.Button(footer,text='이 판매처 매칭 저장',style='Accent.TButton',command=lambda:self.safe(self.save_matching_profile)).pack(side='right')
 
@@ -725,6 +724,35 @@ class Desktop:
         return next((profile for profile in PROFILE_PRESETS
                      if profile.get('channel') == internal or profile.get('name') == channel), {})
 
+    @staticmethod
+    def matching_field_config(profile, preset, field):
+        """Return saved aliases/index while migrating the legacy single address field."""
+        profile = profile or {}
+        preset = preset or {}
+        columns = profile.get('columns', {})
+        indexes = profile.get('column_indexes', {})
+        preset_columns = preset.get('columns', {})
+        if field not in ('address1', 'address2'):
+            values = columns.get(field, []) if 'columns' in profile else ORDER_COLUMNS[field]
+            if not values:
+                values = preset_columns.get(field, [])
+            return list(values), indexes.get(field)
+        position = 0 if field == 'address1' else 1
+        values = columns.get(field, [])
+        index = indexes.get(field)
+        if not values and field == 'address1':
+            values = columns.get('address', [])
+            index = indexes.get('address') if index is None else index
+        combine = profile.get('combine', {}).get('address', [])
+        if not values and len(combine) > position:
+            values = [combine[position]]
+        if not values and field == 'address1':
+            values = preset_columns.get('address', [])
+        preset_combine = preset.get('combine', {}).get('address', [])
+        if not values and len(preset_combine) > position:
+            values = [preset_combine[position]]
+        return list(values), index
+
     def load_matching_profile(self, *_):
         channel = self.selected_matching_channel()
         self.matching_channel.set(channel)
@@ -732,16 +760,11 @@ class Desktop:
         preset = self.matching_preset(channel)
         self.matching_filename.set('; '.join(profile.get('filename_hints',[])))
         self.matching_password.set(profile.get('password','tkdtkd8911!@@'))
-        configured = profile.get('columns',{})
-        indexes = profile.get('column_indexes',{})
-        preset_columns = preset.get('columns', {})
         choices = profile_column_choices(profile, preset)
         for field, variable in self.mapping_vars.items():
-            values = configured.get(field,[]) if 'columns' in profile else ORDER_COLUMNS[field]
-            if not values and isinstance(indexes.get(field), int):
-                values = preset_columns.get(field, [])
-            if isinstance(indexes.get(field), int):
-                variable.set(column_choice(indexes[field], values[0] if values else ''))
+            values, saved_index = self.matching_field_config(profile, preset, field)
+            if isinstance(saved_index, int):
+                variable.set(column_choice(saved_index, values[0] if values else ''))
                 self.mapping_status_vars[field].set('저장값')
             else:
                 variable.set(values[0] if values else '미사용')
@@ -817,8 +840,12 @@ class Desktop:
         choices = ['미사용']+[column_choice(index, header) for index,header in enumerate(self.sample_headers) if header]
         self.mapping_choice_values = choices
         configured = profile.get('columns',{})
-        configured_indexes = profile.get('column_indexes',{})
-        aliases={field:list(dict.fromkeys([*configured.get(field,[]),*preset.get('columns',{}).get(field,[]),*ORDER_COLUMNS[field]])) for field in ORDER_COLUMNS}
+        aliases = {}
+        configured_indexes = {}
+        for field in MAPPING_FIELD_ORDER:
+            values, saved_index = self.matching_field_config(profile, preset, field)
+            aliases[field] = list(dict.fromkeys([*values, *ORDER_COLUMNS[field]]))
+            configured_indexes[field] = saved_index
         matched=match_columns(self.sample_headers,aliases)
         automatic = analyze_order_columns(self.sample_headers, self.sample_rows[row_index+1:row_index+21],aliases)
         for field, box in self.mapping_boxes.items():
@@ -829,8 +856,8 @@ class Desktop:
             elif isinstance(configured_indexes.get(field), int):
                 selected_index = configured_indexes[field]
             else:
-                aliases = configured.get(field) or ORDER_COLUMNS[field]
-                selected_index = next((index for index,name in enumerate(self.sample_headers) if name in aliases),None)
+                field_aliases = aliases[field]
+                selected_index = next((index for index,name in enumerate(self.sample_headers) if name in field_aliases),None)
             if isinstance(selected_index, int) and 0 <= selected_index < len(self.sample_headers):
                 self.mapping_vars[field].set(column_choice(selected_index, self.sample_headers[selected_index]))
                 method=matched.get(field,{}).get('method')
@@ -850,9 +877,13 @@ class Desktop:
             raise ValueError('자동 판별에 사용할 파일명 예시를 한 개 이상 입력하세요.')
         selected = {field:variable.get().strip() for field,variable in self.mapping_vars.items()}
         selected_indexes = {field:choice_column_index(value) for field,value in selected.items()}
-        columns, column_indexes = {}, {}
         old = self.matching_profile(channel) or {}
         preset = self.matching_preset(channel)
+        visible = set(MAPPING_FIELD_ORDER)
+        columns = {field:list(values) for field,values in old.get('columns',{}).items()
+                   if field not in visible and field != 'address'}
+        column_indexes = {field:index for field,index in old.get('column_indexes',{}).items()
+                          if field not in visible and field != 'address'}
         for field,value in selected.items():
             if value in ('','미사용'):
                 continue
@@ -889,7 +920,8 @@ class Desktop:
             'enabled': bool(columns),
             'excludes': old.get('excludes',[]),
             'content_rule': old.get('content_rule'),
-            'combine': old.get('combine') or preset.get('combine',{}),
+            'combine': {field:list(values) for field,values in (old.get('combine') or preset.get('combine',{})).items()
+                        if field != 'address'},
             'sum_columns': old.get('sum_columns') or preset.get('sum_columns',{}),
             'amount_is_unit': old.get('amount_is_unit', preset.get('amount_is_unit',False)),
         }

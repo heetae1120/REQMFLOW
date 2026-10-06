@@ -27,7 +27,10 @@ ORDER_COLUMNS = {
     'product': ['상품명', '주문상품명'], 'option': ['옵션정보', '옵션', '옵션명'],
     'quantity': ['수량', '주문수량'], 'amount': ['최종 상품별 총 주문금액', '상품금액', '결제금액', '주문금액'],
     'recipient': ['수취인명', '수령인', '수령자명', '수령자'], 'phone': ['수취인연락처1', '연락처', '수령자전화번호', '핸드폰', '휴대폰'],
-    'postcode': ['우편번호', '수취인우편번호'], 'address': ['통합배송지', '배송주소', '주소'],
+    'postcode': ['우편번호', '수취인우편번호'],
+    'address': ['통합배송지', '배송주소', '주소'],
+    'address1': ['주소1', '주소 1', '기본주소', '배송지 주소', '배송주소', '배송지', '통합배송지', '주소'],
+    'address2': ['주소2', '주소 2', '상세주소', '배송지 상세주소', '상세배송지'],
     'memo': ['배송메세지', '배송메시지', '배송메모'], 'paid_at': ['결제일', '주문일', '주문일자'],
     'status': ['주문상태'], 'bundle': ['배송비 묶음번호'], 'shipping': ['배송비 합계', '배송비'],
 }
@@ -47,6 +50,8 @@ COLUMN_SEARCH_TERMS = {
     'phone': ['연락처', '전화', '휴대폰', '핸드폰', 'phone', 'mobile'],
     'postcode': ['우편', '우편번호', 'zip', 'postcode'],
     'address': ['주소', '배송지', '기본주소', '상세주소', 'address'],
+    'address1': ['주소1', '주소 1', '주소', '배송지', '기본주소', '배송주소', 'address1'],
+    'address2': ['주소2', '주소 2', '상세주소', '상세배송지', 'address2'],
     'memo': ['메모', '메세지', '메시지', '배송요청', '요청사항', 'memo'],
     'paid_at': ['날짜', '일자', '주문일', '결제일', 'date'],
     'status': ['상태', '진행상태', '주문상태', 'status'],
@@ -531,6 +536,10 @@ def parse_orders(path, profiles, channel_override=None):
             if combined:
                 entry[field] = combined
                 combined_fields.add(field)
+        selected_address = join_text_parts([entry.get('address1'), entry.get('address2')])
+        if selected_address:
+            entry['address'] = selected_address
+            combined_fields.add('address')
         for field,names in profile.get('sum_columns',{}).items():
             values = [_numeric_text(get([name])) for name in names]
             if any(values):
