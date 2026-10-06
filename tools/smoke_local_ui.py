@@ -11,7 +11,7 @@ if resources.exists():
     os.environ['TCL_LIBRARY']=str(resources/'tcl8.6')
     os.environ['TK_LIBRARY']=str(resources/'tk8.6')
 import tkinter as tk
-from reqm_local.desktop import Desktop
+from reqm_local.desktop import Desktop, FIELD_LABELS, MAPPING_FIELD_ORDER
 from reqm_local.service import Operations
 
 with tempfile.TemporaryDirectory(dir=root/'outputs') as folder:
@@ -23,8 +23,12 @@ with tempfile.TemporaryDirectory(dir=root/'outputs') as folder:
         window.update_idletasks()
         assert '검토 필요' in app.summary.get()
         assert len(app.table.get_children())==0
-        assert '중복' in app.table['columns']
-        assert '이벤트' in app.table['columns']
+        assert tuple(app.mapping_vars) == MAPPING_FIELD_ORDER
+        assert [FIELD_LABELS[field] for field in app.mapping_vars] == [
+            '주문일자', '판매처주문번호', '상품주문번호', '상품명', '옵션', '수량', '금액', '배송비',
+            '수령인', '전화번호', '우편번호', '주소 1', '주소 2', '배송메모',
+        ]
+        assert 'address1' in app.mapping_boxes and 'address2' in app.mapping_boxes
         assert str(app.mapping_boxes['order_no'].cget('state')) == 'normal'
         box=app.mapping_boxes['order_no']
         event=type('Event',(),{'keysym':'Hangul'})()
