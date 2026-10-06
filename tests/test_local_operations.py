@@ -19,6 +19,7 @@ from reqm_local.workspace_cloud import export_workspace, import_workspace, works
 from reqm_local.updater import RELEASE_API, prepare_update, version_tuple
 from reqm_local.desktop import FIELD_LABELS, MAPPING_FIELD_ORDER
 from reqm_local.profiles import MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING
+from reqm_local.esm import ESM_DELIVERY_STATUSES, parse_esm_rows
 
 REFERENCE=Path(__file__).resolve().parents[1]/'supabase/ecount_migration/data'
 HEADERS=['주문번호','상품주문번호','상품명','옵션정보','수량','최종 상품별 총 주문금액','수취인명','수취인연락처1','우편번호','통합배송지','배송비 묶음번호','배송비 합계','주문상태','결제일']
@@ -404,6 +405,43 @@ class LocalTests(unittest.TestCase):
         rows=list(book.active.values)[1:]
         self.assertEqual(sum(row[15]*row[16] for row in rows),20000)
         book.close()
+
+    def test_esm_fixed_columns_split_marketplace_and_calculate_unit_amount(self):
+        headers=[f'열{index+1}' for index in range(61)]
+        def row(account,order,product,option,qty,be,bi):
+            values=['']*61
+            values[0]=account;values[2]=order;values[27]=product;values[35]=qty
+            values[49]=option;values[56]=be;values[60]=bi
+            return values
+        path=self.folder/'Order_2026-10-06.xlsx'
+        path.write_bytes(workbook_bytes(headers,[
+            row('G(orora)','G-1','지마켓 상품','검정',2,23000,3000),
+            row('A(orora)','A-1','옥션 상품','흰색',1,15000,1000),
+        ]))
+        parsed=parse_esm_rows(path)
+        self.assertEqual([(item['channel'],item['unit_amount'],item['amount']) for item in parsed],[
+            ('지마켓','10000','20000'),('옥션','14000','14000'),
+        ])
+        self.assertNotIn('전체',ESM_DELIVERY_STATUSES)
+
+    def test_esm_import_deduplicates_and_is_included_in_erp_export(self):
+        headers=[f'열{index+1}' for index in range(61)];values=['']*61
+        values[0]='G(orora)';values[2]='G-ORDER';values[27]='QP1000C';values[35]=2
+        values[49]='블랙';values[56]=23000;values[60]=3000
+        source=self.folder/'esm.xlsx';source.write_bytes(workbook_bytes(headers,[values]))
+        self.assertEqual(self.s.import_esm_erp(source,'2026-10-06'),(1,0))
+        self.assertEqual(self.s.import_esm_erp(source,'2026-10-06'),(0,1))
+        entry=self.s.esm_erp_entries()[0]
+        self.assertEqual((entry['channel'],entry['quantity'],entry['amount']),('지마켓','2','20000'))
+        self.s.set_esm_erp_components(entry['id'],[
+            dict(code='QP1000C',logistics_code='QP1000C',name='테스트 상품',quantity=1,
+                 unit_amount=0,warehouse='300',customer='AC008798'),
+        ])
+        target=self.folder/'esm-erp.xlsx'
+        self.s.export_erp('2026-10-06','2026-10-06',target)
+        book=load_workbook(target,data_only=True);rows=list(book.active.values)[1:];book.close()
+        self.assertEqual(sum(row[15]*row[16] for row in rows),20000)
+        self.assertEqual(self.s.esm_erp_entries()[0]['erp_id'] is not None,True)
 
     def test_explicit_address_columns_are_joined_with_one_space(self):
         profile = {

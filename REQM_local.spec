@@ -12,7 +12,7 @@ if Path('config.json').exists():
     datas.append(('config.json','.'))
 a = Analysis(['reqm_local_app.py'], pathex=[],
     datas=datas,
-    hiddenimports=['xlrd','msoffcrypto','olefile','cryptography','tkinterdnd2','pystray._win32','supabase','reqm_local.updater'], binaries=[], excludes=['PySide6','numpy','pandas','matplotlib','scipy','IPython','pytest'])
+    hiddenimports=['xlrd','msoffcrypto','olefile','cryptography','tkinterdnd2','pystray._win32','supabase','selenium','reqm_local.updater'], binaries=[], excludes=['PySide6','numpy','pandas','matplotlib','scipy','IPython','pytest'])
 pyz = PYZ(a.pure)
 exe = EXE(pyz,a.scripts,[],exclude_binaries=True,name='REQM_FLOW',console=False,icon='assets/branding/rq_app.ico')
 coll = COLLECT(exe,a.binaries,a.datas,name='REQM_FLOW')

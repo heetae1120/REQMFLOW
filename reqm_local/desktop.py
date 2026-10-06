@@ -28,9 +28,10 @@ from .workspace_cloud import CloudWorkspace, WorkspaceConflict
 from .profiles import PROFILE_PRESETS, SALES_CHANNELS, MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING
 from .column_matching import match_columns
 from .shipping import compact, channel_key
+from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.7.1'
+APP_VERSION = '1.8.0'
 
 
 CHANNEL_TO_INTERNAL = {
@@ -270,10 +271,12 @@ class Desktop:
         result_tabs.pack(fill='both',expand=True)
         result_input = ttk.Frame(result_tabs,padding=20)
         amount_frame = ttk.Frame(result_tabs,padding=20)
+        esm_frame = ttk.Frame(result_tabs,padding=20)
         erp_frame = ttk.Frame(result_tabs,padding=20)
         self.erp_ship_day = tk.StringVar(value=date.today().isoformat())
         result_tabs.add(result_input,text='1  출고건 확인')
         result_tabs.add(amount_frame,text='2  금액 매칭 및 세트 분리')
+        result_tabs.add(esm_frame,text='2-1  옥션/지마켓 ERP전환')
         result_tabs.add(erp_frame,text='3  ERP 파일 생성 및 다운로드')
         ttk.Label(result_input,text='당일 출고건 확인',font=(self.font_family,18,'bold')).pack(anchor='w')
         ttk.Label(result_input,text='당일 생성한 출고요청은 자동으로 불러오거나, 위킵 반환 파일로 직접 반영할 수 있습니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
@@ -303,8 +306,35 @@ class Desktop:
         self.button(amount_line,'선택 세트 구성',self.edit_erp_set,style='Quiet.TButton')
         self.erp_shipments = self.tree(amount_frame,['구분','실제 출고일','주문번호','이름','ERP 품목코드','ERP 품목명','출고수량','ERP 반영금액'],[125,110,150,110,150,250,80,120])
         self.erp_shipments.bind('<Double-1>',lambda _event:self.safe(self.match_erp_amount))
+        self.esm_start_day = tk.StringVar(value=date.today().isoformat())
+        self.esm_end_day = tk.StringVar(value=date.today().isoformat())
+        self.esm_user_id = tk.StringVar()
+        self.esm_password = tk.StringVar()
+        self.esm_progress = tk.StringVar(value='조회 기간과 로그인 정보를 확인한 뒤 자동 다운로드를 실행하세요.')
+        saved_user,saved_password=load_credentials(self.service.folder/'esm_credentials.dat')
+        self.esm_user_id.set(saved_user);self.esm_password.set(saved_password)
+        ttk.Label(esm_frame,text='옥션/지마켓 ESM PLUS ERP전환',font=(self.font_family,18,'bold')).pack(anchor='w')
+        ttk.Label(esm_frame,text='A/G 전체에서 주문일과 배송상태별 파일을 내려받아 옥션·지마켓 ERP 행으로 변환합니다.',foreground='#64748B').pack(anchor='w',pady=(4,14))
+        esm_card=ttk.LabelFrame(esm_frame,text='ESM PLUS 자동 수집',padding=14);esm_card.pack(fill='x')
+        form=ttk.Frame(esm_card);form.pack(fill='x')
+        for label,var,width,secret in [
+            ('시작 주문일',self.esm_start_day,12,False),('종료 주문일',self.esm_end_day,12,False),
+            ('아이디',self.esm_user_id,22,False),('비밀번호',self.esm_password,22,True),
+        ]:
+            ttk.Label(form,text=label).pack(side='left',padx=(8,4))
+            ttk.Entry(form,textvariable=var,width=width,show='●' if secret else '').pack(side='left')
+        self.button(form,'로그인 정보 보호 저장',self.save_esm_login,style='Quiet.TButton')
+        self.button(form,'ESM PLUS 자동 다운로드',self.download_esm,style='Accent.TButton')
+        self.button(form,'파일 직접 추가',self.import_esm_files,style='Quiet.TButton')
+        ttk.Label(esm_card,textvariable=self.esm_progress,foreground='#2563EB').pack(anchor='w',padx=8,pady=(10,0))
+        esm_actions=ttk.Frame(esm_frame);esm_actions.pack(fill='x',pady=(12,8))
+        ttk.Label(esm_actions,text='변환 내역',font=(self.font_family,11,'bold')).pack(side='left')
+        self.button(esm_actions,'선택 상품 매칭',self.edit_esm_set,style='Accent.TButton')
+        self.button(esm_actions,'목록 새로고침',self.refresh_esm_entries,style='Quiet.TButton')
+        self.esm_entries=self.tree(esm_frame,['기준일','판매처','주문번호','상품명','옵션','수량','단가','합계','ERP 품목','상태'],[105,90,145,280,220,65,95,105,170,180])
+        self.esm_entries.bind('<Double-1>',lambda _event:self.safe(self.edit_esm_set))
         ttk.Label(erp_frame,text='이카운트 ERP 파일 생성 및 다운로드',font=(self.font_family,18,'bold')).pack(anchor='w')
-        ttk.Label(erp_frame,text='금액 매칭이 완료된 미반영 출고 건만 파일에 포함됩니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
+        ttk.Label(erp_frame,text='2번 실제출고·스마트스토어와 2-1 옥션/지마켓의 매칭 완료 건을 한 파일에 포함합니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
         self.through = tk.StringVar(value=date.today().isoformat())
         self.voucher = tk.StringVar(value=date.today().isoformat())
         erp_card = ttk.LabelFrame(erp_frame,text='출력 조건',padding=18);erp_card.pack(fill='x')
@@ -1023,6 +1053,7 @@ class Desktop:
         self.refresh_orders()
         self.refresh_erp_shipments()
         self.refresh_confirmed_shipments()
+        self.refresh_esm_entries()
         self.refresh_channel_status()
         counts={state:sum(o['state']==state for o in self.rows.values()) for state in ['검토 필요','출고 준비','출고 요청','부분 출고','출고 완료']}
         stats=self.service.match_statistics(self.rows.values())
@@ -1508,6 +1539,123 @@ class Desktop:
         if path:
             new,duplicate=self.service.import_smartstore_erp(path,self.erp_ship_day.get());self.refresh()
             messagebox.showinfo('반영 완료',f'스마트스토어 ERP {new}행 · 중복 제외 {duplicate}행')
+
+    def save_esm_login(self):
+        save_credentials(
+            self.service.folder/'esm_credentials.dat',
+            self.esm_user_id.get(), self.esm_password.get(),
+        )
+        messagebox.showinfo(
+            '보호 저장 완료',
+            'ESM PLUS 로그인 정보를 Windows 사용자 계정으로 암호화해 이 PC에만 저장했습니다.',
+            parent=self.root,
+        )
+
+    def import_esm_files(self):
+        paths=filedialog.askopenfilenames(
+            parent=self.root,title='ESM PLUS 전체주문 엑셀 선택',
+            filetypes=[('ESM PLUS 주문 파일','*.xls *.xlsx')],
+        )
+        if not paths:return
+        imported_on=date.fromisoformat(self.esm_end_day.get()).isoformat()
+        new,duplicate=self.service.import_esm_erp(paths,imported_on)
+        self.refresh()
+        messagebox.showinfo('ESM 변환 완료',f'옥션/지마켓 {new:,}행 · 중복 제외 {duplicate:,}행',parent=self.root)
+
+    def download_esm(self):
+        if getattr(self,'_esm_downloading',False):
+            raise ValueError('ESM PLUS 자동 다운로드가 이미 진행 중입니다.')
+        start=date.fromisoformat(self.esm_start_day.get()).isoformat()
+        end=date.fromisoformat(self.esm_end_day.get()).isoformat()
+        if start>end:raise ValueError('시작 주문일은 종료 주문일보다 늦을 수 없습니다.')
+        user_id,password=self.esm_user_id.get().strip(),self.esm_password.get()
+        if not user_id or not password:raise ValueError('ESM PLUS 아이디와 비밀번호를 입력하세요.')
+        self._esm_downloading=True
+        self.esm_progress.set('ESM PLUS 자동 다운로드를 시작합니다. 브라우저를 닫지 마세요.')
+        download_dir=self.service.folder/'esm_downloads'/f'{start}_{end}'
+        def progress(item):
+            self.root.after(0,lambda:self.esm_progress.set(f'{item.status} · {item.detail}'))
+        def worker():
+            try:
+                paths=download_esm_orders(user_id,password,start,end,download_dir,progress)
+                self.root.after(0,lambda:(setattr(self,'_esm_downloading',False),self.safe(lambda:self._finish_esm_download(paths,end))))
+            except Exception as exc:
+                detail=str(exc) or exc.__class__.__name__
+                self.root.after(0,lambda:self._esm_download_failed(detail))
+        threading.Thread(target=worker,daemon=True).start()
+
+    def _finish_esm_download(self, paths, imported_on):
+        self._esm_downloading=False
+        new,duplicate=self.service.import_esm_erp(paths,imported_on)
+        self.esm_progress.set(f'완료 · 파일 {len(paths):,}개 · 신규 {new:,}행 · 중복 {duplicate:,}행')
+        self.refresh()
+        messagebox.showinfo('ESM 자동 수집 완료',f'파일 {len(paths):,}개에서 신규 {new:,}행을 변환했습니다.\n중복 {duplicate:,}행은 제외했습니다.',parent=self.root)
+
+    def _esm_download_failed(self, detail):
+        self._esm_downloading=False
+        self.esm_progress.set('자동 다운로드 실패 · 파일 직접 추가도 사용할 수 있습니다.')
+        messagebox.showerror('ESM 자동 다운로드 확인',detail,parent=self.root)
+
+    def refresh_esm_entries(self):
+        if not hasattr(self,'esm_entries'):return
+        self.esm_entries.delete(*self.esm_entries.get_children())
+        for entry in self.service.esm_erp_entries():
+            status='ERP 반영 완료' if entry['erp_id'] else entry['issue'] or '변환 준비'
+            self.esm_entries.insert('', 'end', iid=entry['id'], values=[
+                entry['day'],entry['channel'],entry['order_no'],entry['product'],entry['option'],
+                entry['quantity'],f"{int(Decimal(entry['unit_amount'])):,}",f"{int(Decimal(entry['amount'])):,}",
+                entry['component_summary'] or '미매칭',status,
+            ],tags=('review',) if entry['issue'] and not entry['erp_id'] else ())
+        self.esm_entries.tag_configure('review',foreground='#BE123C',background='#FFF1F2')
+        self.root.after_idle(lambda:autosize_tree(self.esm_entries,maximum=340))
+
+    def edit_esm_set(self):
+        entry_id=self.selected(self.esm_entries)[0]
+        row=self.service.esm_erp_row(entry_id)
+        if not row:raise ValueError('옥션/지마켓 ERP 행을 찾지 못했습니다.')
+        data=row['data'];channel=data['channel']
+        win=tk.Toplevel(self.root);win.title(f'{channel} ERP 상품 매칭');win.geometry('1120x620');win.transient(self.root);win.grab_set()
+        ttk.Label(win,text=f'{channel} ERP 상품 매칭',font=(self.font_family,17,'bold'),padding=(16,14)).pack(anchor='w')
+        ttk.Label(win,text=f"{data.get('order_no')}  |  {data.get('product')} / {data.get('option')}",padding=(16,0),wraplength=1050).pack(anchor='w')
+        ttk.Label(win,text=f"주문수량 {data['quantity']} · ERP 총금액 {int(Decimal(data['amount'])):,}원 · 첫 구성품 금액은 나머지 금액으로 자동 계산됩니다.",foreground='#64748B',padding=(16,6)).pack(anchor='w')
+        grid=ttk.Frame(win,padding=16);grid.pack(fill='both',expand=True)
+        labels=['ERP 품목코드','품목명','부속품 단가','출하창고','거래처코드']
+        for column,label in enumerate(labels):ttk.Label(grid,text=label).grid(row=0,column=column,padx=4,pady=6,sticky='w')
+        entries=[];customer=self.service.channel_customer_code(channel)
+        def add_row(component=None):
+            component=component or {};index=len(entries);q=max(1,int(component.get('quantity') or data.get('quantity') or 1))
+            unit='0' if index==0 else str(int(Decimal(component.get('amount','0'))/Decimal(q)))
+            values={
+                'code':tk.StringVar(value=component.get('code','')),
+                'name':tk.StringVar(value=component.get('name','')),
+                'unit_amount':tk.StringVar(value=unit),
+                'warehouse':tk.StringVar(value=component.get('warehouse',self.service.settings['warehouse'])),
+                'customer':tk.StringVar(value=component.get('customer',customer)),
+            }
+            widgets=[]
+            for column,key in enumerate(('code','name','unit_amount','warehouse','customer')):
+                widget=ttk.Entry(grid,textvariable=values[key],width=(24 if key in ('code','customer') else 34 if key=='name' else 13))
+                widget.grid(row=index+1,column=column,padx=4,pady=4,sticky='ew');widgets.append(widget)
+            entries.append((values,widgets))
+        for component in row['components']:add_row(component)
+        if not entries:add_row()
+        def remove_row():
+            if len(entries)>1:
+                _,widgets=entries.pop()
+                for widget in widgets:widget.destroy()
+        def save():
+            components=[]
+            for values,_ in entries:
+                item={key:value.get().strip() for key,value in values.items()}
+                item.update({'logistics_code':item['code'],'quantity':'1'})
+                components.append(item)
+            self.service.set_esm_erp_components(entry_id,components)
+            win.destroy();self.refresh()
+        actions=ttk.Frame(win,padding=16);actions.pack(fill='x')
+        self.button(actions,'구성품 추가',lambda:add_row())
+        self.button(actions,'마지막 구성품 삭제',remove_row,style='Danger.TButton')
+        self.button(actions,'상품 매칭 저장',save,style='Accent.TButton')
+        self.button(actions,'닫기',win.destroy)
 
     def refresh_confirmed_shipments(self):
         if not hasattr(self,'confirmed_shipments'):

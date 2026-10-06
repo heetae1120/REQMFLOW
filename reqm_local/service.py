@@ -20,6 +20,7 @@ from .files import (
     parse_orders, read_rows, identifier, workbook_bytes, wekeep_workbook_bytes,
     REQUEST_COLUMNS, WEKEEP_REQUEST_COLUMNS, settings_at,
 )
+from .esm import parse_esm_rows
 
 
 SMARTSTORE_CHANNEL = '리큐엠_스마트스토어'
@@ -105,6 +106,9 @@ class Operations:
             qty INTEGER NOT NULL, tracking TEXT NOT NULL, day TEXT NOT NULL, erp_id TEXT, erp_amount TEXT,
             UNIQUE(line_id,tracking,day));
         CREATE TABLE IF NOT EXISTS smartstore_erp_rows(id TEXT PRIMARY KEY, identity TEXT UNIQUE NOT NULL,
+            day TEXT NOT NULL, data TEXT NOT NULL, components TEXT NOT NULL DEFAULT '[]',
+            erp_id TEXT, issue TEXT NOT NULL DEFAULT '');
+        CREATE TABLE IF NOT EXISTS esm_erp_rows(id TEXT PRIMARY KEY, identity TEXT UNIQUE NOT NULL,
             day TEXT NOT NULL, data TEXT NOT NULL, components TEXT NOT NULL DEFAULT '[]',
             erp_id TEXT, issue TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS fees(bundle TEXT PRIMARY KEY, erp_id TEXT NOT NULL);
@@ -920,6 +924,67 @@ class Operations:
             self.event('스마트스토어 ERP 원본 반영',f'신규 {added}, 중복 {duplicates}, 출고일 {shipped_on}')
         return added, duplicates
 
+    def _erp_source_components(self, data):
+        custom = self.db.execute('SELECT components FROM mappings WHERE key=?', (self.mapping_key(data),)).fetchone()
+        if custom:
+            return self._build_components(data, json.loads(custom[0]))
+        catalog_channel = self.catalog_channel(data['channel'])
+        if catalog_channel not in self.catalog.channels:
+            return [], f'{data["channel"]}의 ERP 거래처코드가 없습니다.'
+        order = SmartStoreOrder(
+            0, data.get('order_no',''), data.get('order_no',''), datetime.now(), '결제완료',
+            data.get('product',''), data.get('option',''), Decimal(data['quantity']),
+            number(data['amount']), include_shipping=False,
+        )
+        converted = convert_orders(
+            [order], self.conversion_catalog(catalog_channel), channel_name=catalog_channel,
+            default_warehouse=self.settings['warehouse'],
+        )
+        if converted.issues or not converted.is_reconciled:
+            reason = '; '.join(issue.reason for issue in converted.issues) or 'ERP 상품 변환 규칙이 없습니다.'
+            return [], reason
+        grouped = {}
+        for line in converted.lines:
+            if not line.item_code or line.item_code not in self.catalog.items:
+                return [], '등록된 ERP 품목코드가 필요합니다.'
+            key = (line.item_code, line.warehouse)
+            if key not in grouped:
+                grouped[key] = dict(
+                    code=line.item_code, logistics_code=line.item_code, name=line.item_name,
+                    quantity=0, amount='0', warehouse=line.warehouse, customer=line.customer_code,
+                    match_method='판매전표 DB 변환 규칙',
+                )
+            component = grouped[key]
+            component['quantity'] += quantity(line.quantity)
+            component['amount'] = str(number(component['amount']) + line.total)
+        return list(grouped.values()), ''
+
+    def import_esm_erp(self, paths, on):
+        imported_on = day(on)
+        if isinstance(paths, (str, Path)):
+            paths = [paths]
+        added = duplicates = 0
+        with self.db:
+            for path in paths:
+                for data in parse_esm_rows(path):
+                    data['account'] = data.get('account') or '기본'
+                    row_day = day(data.get('order_day') or imported_on)
+                    token = encode([
+                        data.get('channel'), data.get('account'), data.get('order_no'), data.get('product'),
+                        data.get('source_product_no'), data.get('option'), data.get('quantity'), data.get('amount'),
+                    ])
+                    identity = hashlib.sha256(token.encode('utf-8')).hexdigest()
+                    if self.db.execute('SELECT 1 FROM esm_erp_rows WHERE identity=?',(identity,)).fetchone():
+                        duplicates += 1
+                        continue
+                    components, issue = self._erp_source_components(data)
+                    self.db.execute('INSERT INTO esm_erp_rows VALUES(?,?,?,?,?,?,?)',(
+                        uuid.uuid4().hex, identity, row_day, encode(data), encode(components), None, issue,
+                    ))
+                    added += 1
+            self.event('옥션/지마켓 ERP 원본 반영', f'신규 {added}, 중복 {duplicates}, 기준일 {imported_on}')
+        return added, duplicates
+
     def confirmed_erp_entries(self, on=None):
         selected_day = day(on) if on else None
         entries = []
@@ -1034,6 +1099,60 @@ class Operations:
             self.settings.setdefault('channel_customer_codes',{})[SMARTSTORE_CHANNEL]=customer
             self._write_settings()
 
+    def esm_erp_entries(self, on=None, pending_only=False):
+        conditions, parameters = [], []
+        if on:
+            conditions.append('day=?'); parameters.append(day(on))
+        if pending_only:
+            conditions.append('erp_id IS NULL')
+        query = 'SELECT * FROM esm_erp_rows'
+        if conditions:
+            query += ' WHERE ' + ' AND '.join(conditions)
+        entries = []
+        for row in self.db.execute(query + ' ORDER BY day,rowid', parameters):
+            data, components = json.loads(row['data']), json.loads(row['components'])
+            entries.append({
+                'id':f"ESM:{row['id']}", 'day':row['day'], 'channel':data.get('channel',''),
+                'order_no':data.get('order_no',''), 'product':data.get('product',''),
+                'option':data.get('option',''), 'quantity':data.get('quantity',''),
+                'unit_amount':data.get('unit_amount',''), 'amount':data.get('amount',''),
+                'component_summary':' / '.join(component.get('code','') for component in components),
+                'issue':row['issue'], 'erp_id':row['erp_id'],
+            })
+        return entries
+
+    def esm_erp_row(self, entry_id):
+        if not str(entry_id).startswith('ESM:'):
+            return None
+        row = self.db.execute('SELECT * FROM esm_erp_rows WHERE id=?',(str(entry_id).split(':',1)[1],)).fetchone()
+        return {**dict(row),'data':json.loads(row['data']),'components':json.loads(row['components'])} if row else None
+
+    def set_esm_erp_components(self, entry_id, components):
+        row = self.esm_erp_row(entry_id)
+        if not row:
+            raise ValueError('옥션/지마켓 ERP 행을 찾지 못했습니다.')
+        if row['erp_id']:
+            raise ValueError('이미 ERP 파일로 만든 행은 수정할 수 없습니다.')
+        channel = row['data']['channel']
+        definitions, customer = self._prepare_component_definitions(channel, components)
+        built, issue = self._build_components(row['data'], definitions)
+        if issue:
+            raise ValueError(issue)
+        with self.db:
+            self.db.execute('INSERT OR REPLACE INTO mappings VALUES(?,?)',(self.mapping_key(row['data']),encode(definitions)))
+            for candidate in self.db.execute('SELECT id,data FROM esm_erp_rows WHERE erp_id IS NULL').fetchall():
+                candidate_data=json.loads(candidate['data'])
+                if self.mapping_key(candidate_data) != self.mapping_key(row['data']):
+                    continue
+                candidate_components,candidate_issue=self._build_components(candidate_data,definitions)
+                self.db.execute('UPDATE esm_erp_rows SET components=?,issue=? WHERE id=?',(
+                    encode(candidate_components),candidate_issue,candidate['id'],
+                ))
+            self.event('옥션/지마켓 ERP 상품 매칭', row['id'])
+        if customer:
+            self.settings.setdefault('channel_customer_codes',{})[channel] = customer
+            self._write_settings()
+
     def export_erp(self, on, through, path):
         on, through = day(on), day(through)
         batch = 'E-' + uuid.uuid4().hex[:12]
@@ -1043,7 +1162,8 @@ class Operations:
         if self.smartstore_erp_enabled():
             pending = [shipment for shipment in pending if not is_smartstore_channel(orders[shipment['order_id']]['data'].get('channel'))]
         smart_rows=self.db.execute('SELECT * FROM smartstore_erp_rows WHERE erp_id IS NULL AND day<=? ORDER BY day,rowid',(through,)).fetchall()
-        if not pending and not smart_rows:
+        esm_rows=self.db.execute('SELECT * FROM esm_erp_rows WHERE erp_id IS NULL AND day<=? ORDER BY day,rowid',(through,)).fetchall()
+        if not pending and not smart_rows and not esm_rows:
             raise ValueError('선택한 날짜까지 ERP 파일에 반영하지 않은 실제 출고가 없습니다.')
         unmatched = [shipment for shipment in pending if shipment['erp_amount'] in (None,'')]
         if unmatched:
@@ -1055,6 +1175,13 @@ class Operations:
                 smart_unmatched.append(row)
         if smart_unmatched:
             raise ValueError(f'금액 매칭 또는 세트 분리가 필요한 스마트스토어 ERP 주문이 {len(smart_unmatched):,}건 있습니다.')
+        esm_unmatched=[]
+        for row in esm_rows:
+            components=json.loads(row['components'])
+            if row['issue'] or not components or any(component.get('amount') in (None,'') for component in components):
+                esm_unmatched.append(row)
+        if esm_unmatched:
+            raise ValueError(f'상품 매칭이 필요한 옥션/지마켓 ERP 주문이 {len(esm_unmatched):,}건 있습니다.')
         rows = []
         def append(c, q, amount):
             # Split integer won totals into two unit prices to retain exact totals.
@@ -1074,6 +1201,10 @@ class Operations:
                 for component in json.loads(smart_row['components']):
                     append(component,quantity(component['quantity']),number(component['amount']))
                 self.db.execute('UPDATE smartstore_erp_rows SET erp_id=? WHERE id=?',(batch,smart_row['id']))
+            for esm_row in esm_rows:
+                for component in json.loads(esm_row['components']):
+                    append(component,quantity(component['quantity']),number(component['amount']))
+                self.db.execute('UPDATE esm_erp_rows SET erp_id=? WHERE id=?',(batch,esm_row['id']))
             groups = {}
             for order in orders.values():
                 groups.setdefault(self.bundle_key(order['data']),[]).append(order)

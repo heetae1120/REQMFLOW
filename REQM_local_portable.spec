@@ -13,7 +13,7 @@ a = Analysis(
     ['reqm_local_app.py'],
     pathex=[],
     datas=datas,
-    hiddenimports=['xlrd','pystray._win32','supabase'],
+    hiddenimports=['xlrd','pystray._win32','supabase','selenium'],
     binaries=[],
     excludes=['PySide6','numpy','pandas','matplotlib','scipy','IPython','pytest'],
 )
