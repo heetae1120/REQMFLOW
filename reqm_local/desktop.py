@@ -7,6 +7,7 @@ import sys
 import threading
 import tkinter as tk
 import ctypes
+import calendar
 import tkinter.font as tkfont
 from difflib import SequenceMatcher
 from datetime import date
@@ -31,7 +32,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.8.1'
+APP_VERSION = '1.8.2'
 
 
 CHANNEL_TO_INTERNAL = {
@@ -59,6 +60,10 @@ MAPPING_FIELD_ORDER = (
 SUGGESTED_MAPPING_FIELDS = ('order_no', 'line_no', 'product', 'quantity', 'amount')
 FONT_FAMILY = 'Pretendard'
 EMPTY_COLUMN_CHOICES = ['미사용']
+
+
+def calendar_month_days(year: int, month: int) -> list[list[int]]:
+    return calendar.Calendar(firstweekday=6).monthdayscalendar(year, month)
 
 
 def asset_path(*parts: str) -> Path:
@@ -317,12 +322,12 @@ class Desktop:
         ttk.Label(esm_frame,text='A/G 전체에서 주문일과 배송상태별 파일을 내려받아 옥션·지마켓 ERP 행으로 변환합니다.',foreground='#64748B').pack(anchor='w',pady=(4,14))
         esm_card=ttk.LabelFrame(esm_frame,text='ESM PLUS 자동 수집',padding=14);esm_card.pack(fill='x')
         form=ttk.Frame(esm_card);form.pack(fill='x')
-        for label,var,width,secret in [
-            ('시작 주문일',self.esm_start_day,12,False),('종료 주문일',self.esm_end_day,12,False),
-            ('아이디',self.esm_user_id,22,False),('비밀번호',self.esm_password,22,True),
-        ]:
+        for label,var in [('시작 주문일',self.esm_start_day),('종료 주문일',self.esm_end_day)]:
             ttk.Label(form,text=label).pack(side='left',padx=(8,4))
-            ttk.Entry(form,textvariable=var,width=width,show='●' if secret else '').pack(side='left')
+            self.date_picker(form,var,label).pack(side='left')
+        for label,var,secret in [('아이디',self.esm_user_id,False),('비밀번호',self.esm_password,True)]:
+            ttk.Label(form,text=label).pack(side='left',padx=(8,4))
+            ttk.Entry(form,textvariable=var,width=22,show='●' if secret else '').pack(side='left')
         self.button(form,'로그인 정보 보호 저장',self.save_esm_login,style='Quiet.TButton')
         self.button(form,'ESM PLUS 자동 다운로드',self.download_esm,style='Accent.TButton')
         self.button(form,'파일 직접 추가',self.import_esm_files,style='Quiet.TButton')
@@ -362,9 +367,46 @@ class Desktop:
         self.root.protocol('WM_DELETE_WINDOW',self.hide_to_tray)
         self.root.bind('<Destroy>',self.on_root_destroy,add='+')
         self.setup_tray()
+        self.root.after(350,self.auto_cloud_login)
         self.root.after(4000,self.check_for_source_update)
         if getattr(sys,'frozen',False):
             self.root.after(1800,self.check_remote_update)
+
+    def date_picker(self, parent, variable, title='날짜 선택'):
+        holder=ttk.Frame(parent)
+        ttk.Entry(holder,textvariable=variable,width=11,state='readonly').pack(side='left')
+        ttk.Button(holder,text='▾',width=3,command=lambda:self.open_calendar(variable,title)).pack(side='left',padx=(2,0))
+        return holder
+
+    def open_calendar(self, variable, title='날짜 선택'):
+        try:selected=date.fromisoformat(variable.get())
+        except ValueError:selected=date.today()
+        win=tk.Toplevel(self.root);win.title(title);win.transient(self.root);win.resizable(False,False);win.grab_set()
+        body=ttk.Frame(win,padding=12);body.pack(fill='both',expand=True)
+        state={'year':selected.year,'month':selected.month}
+        heading=ttk.Frame(body);heading.pack(fill='x',pady=(0,8))
+        grid=ttk.Frame(body);grid.pack()
+        month_text=tk.StringVar()
+        ttk.Button(heading,text='‹',width=3,command=lambda:move(-1)).pack(side='left')
+        ttk.Label(heading,textvariable=month_text,font=(self.font_family,11,'bold'),anchor='center').pack(side='left',fill='x',expand=True,padx=12)
+        ttk.Button(heading,text='›',width=3,command=lambda:move(1)).pack(side='right')
+        def choose(day):
+            variable.set(date(state['year'],state['month'],day).isoformat());win.destroy()
+        def draw():
+            for child in grid.winfo_children():child.destroy()
+            month_text.set(f"{state['year']}년 {state['month']}월")
+            for column,label in enumerate(('일','월','화','수','목','금','토')):
+                ttk.Label(grid,text=label,width=4,anchor='center',foreground='#64748B').grid(row=0,column=column,pady=(0,4))
+            for row,week in enumerate(calendar_month_days(state['year'],state['month']),start=1):
+                for column,day_value in enumerate(week):
+                    if day_value:
+                        style='Accent.TButton' if date(state['year'],state['month'],day_value)==selected else 'Quiet.TButton'
+                        ttk.Button(grid,text=str(day_value),width=4,style=style,command=lambda value=day_value:choose(value)).grid(row=row,column=column,padx=1,pady=1)
+        def move(delta):
+            month=state['month']+delta
+            state['year']+=(month-1)//12;state['month']=(month-1)%12+1;draw()
+        draw();win.update_idletasks()
+        win.geometry(f'+{self.root.winfo_rootx()+180}+{self.root.winfo_rooty()+160}')
 
     def source_stamp(self):
         if getattr(sys,'frozen',False):
@@ -536,7 +578,9 @@ class Desktop:
             text='Supabase 대시보드 팀원 계정이 아닙니다.\n이 프로젝트의 Authentication > Users에 등록된 계정을 입력하세요.',
             foreground='#64748B',
         ).grid(row=1,column=0,columnspan=2,sticky='w',pady=(0,12))
-        email=tk.StringVar(value=self.service.settings.get('cloud_email',''));password=tk.StringVar()
+        saved_email,saved_password=load_credentials(self.service.folder/'supabase_credentials.dat')
+        email=tk.StringVar(value=saved_email or self.service.settings.get('cloud_email',''))
+        password=tk.StringVar(value=saved_password)
         ttk.Label(frame,text='이메일').grid(row=2,column=0,sticky='w',padx=(0,10),pady=5)
         email_entry=ttk.Entry(frame,textvariable=email,width=38);email_entry.grid(row=2,column=1,sticky='ew',pady=5)
         ttk.Label(frame,text='비밀번호').grid(row=3,column=0,sticky='w',padx=(0,10),pady=5)
@@ -552,20 +596,35 @@ class Desktop:
             if not user or not secret:
                 status.set('이메일과 비밀번호를 입력하세요.');return
             login_button.configure(state='disabled');status.set('로그인 및 DB 불러오는 중…');self.cloud_status.set('API 연결 중…')
-            threading.Thread(target=self._cloud_login_worker,args=(win,user,secret,status,login_button),daemon=True).start()
+            threading.Thread(target=self._cloud_login_worker,args=(win,user,secret,status,login_button,True),daemon=True).start()
         login_button.configure(command=start);password_entry.bind('<Return>',start)
         (email_entry if not email.get() else password_entry).focus_set()
 
-    def _cloud_login_worker(self,win,email,password,status,login_button):
+    def auto_cloud_login(self):
+        if self.cloud_client is not None or self._quitting:
+            return
+        email,password=load_credentials(self.service.folder/'supabase_credentials.dat')
+        if not email or not password:
+            return
+        self.cloud_status.set('API 자동 로그인 중…')
+        threading.Thread(
+            target=self._cloud_login_worker,
+            args=(None,email,password,None,None,False),daemon=True,
+        ).start()
+
+    def _cloud_login_worker(self,win,email,password,status,login_button,show_notice=True):
         try:
             client,catalog,counts=login_and_load(email,password,self.service.reference_dir)
-            self.root.after(0,lambda:self._cloud_login_success(win,email,client,catalog,counts))
+            self.root.after(0,lambda:self._cloud_login_success(win,email,password,client,catalog,counts,show_notice))
         except Exception as exc:
             detail=str(exc)
             self.root.after(0,lambda:self._cloud_login_failed(status,login_button,detail))
 
-    def _cloud_login_success(self,win,email,client,catalog,counts):
+    def _cloud_login_success(self,win,email,password,client,catalog,counts,show_notice=True):
         self.cloud_client=client;self.service.catalog=catalog
+        save_credentials(
+            self.service.folder/'supabase_credentials.dat',email,password,account_name='Supabase API'
+        )
         self.service.settings['cloud_email']=email
         path=self.service.folder/'settings.json';temporary=path.with_suffix('.json.tmp')
         temporary.write_text(json.dumps(self.service.settings,ensure_ascii=False,indent=2),encoding='utf-8');os.replace(temporary,path)
@@ -576,7 +635,7 @@ class Desktop:
             workspace.push_if_changed()
         except Exception as exc:
             self.cloud_client=None;self.cloud_workspace=None;self.cloud_status.set('API 로그인')
-            if win.winfo_exists():win.destroy()
+            if win is not None and win.winfo_exists():win.destroy()
             messagebox.showerror(
                 '공유 DB 연결 실패',
                 f'{exc}\n\nSupabase SQL Editor에서 002_reqm_shared_workspace.sql을 먼저 실행했는지 확인하세요.',
@@ -585,18 +644,19 @@ class Desktop:
             return
         self.cloud_workspace=workspace
         self.cloud_status.set(f'공유 DB 연결됨 · v{workspace.version}')
-        if win.winfo_exists():win.destroy()
+        if win is not None and win.winfo_exists():win.destroy()
         self.refresh()
         self.load_matching_profile()
         self.root.after(5000,self.poll_cloud_workspace)
         total=counts.get('ecount_item_reference',0)
         action='기존 공유 자료를 이 PC에 적용했습니다.' if direction=='downloaded' else '이 PC의 기존 자료를 첫 공유 자료로 올렸습니다.'
-        messagebox.showinfo('공유 DB 연결 완료',f'{action}\n전표 품목 {total:,}개 · 출고 별칭 {counts.get("item_aliases",0):,}개 · 전표 변환 {counts.get("ecount_product_mappings",0):,}개\n기존 주문의 별칭·변환 규칙을 다시 적용했습니다.',parent=self.root)
+        if show_notice:
+            messagebox.showinfo('공유 DB 연결 완료',f'{action}\n전표 품목 {total:,}개 · 출고 별칭 {counts.get("item_aliases",0):,}개 · 전표 변환 {counts.get("ecount_product_mappings",0):,}개\n기존 주문의 별칭·변환 규칙을 다시 적용했습니다.',parent=self.root)
 
     def _cloud_login_failed(self,status,login_button,detail):
-        self.cloud_status.set('API 로그인')
-        status.set(f'로그인 실패: {detail}')
-        login_button.configure(state='normal')
+        self.cloud_status.set('API 로그인 실패 · 다시 시도')
+        if status is not None:status.set(f'로그인 실패: {detail}')
+        if login_button is not None:login_button.configure(state='normal')
 
     def _refresh_cloud_worker(self):
         try:

@@ -17,7 +17,7 @@ from reqm_local.shipping import ShippingCatalog, compact
 from reqm_local.ui_helpers import filter_combobox_choices, search_suggestions
 from reqm_local.workspace_cloud import export_workspace, import_workspace, workspace_digest
 from reqm_local.updater import RELEASE_API, prepare_update, version_tuple
-from reqm_local.desktop import FIELD_LABELS, MAPPING_FIELD_ORDER
+from reqm_local.desktop import FIELD_LABELS, MAPPING_FIELD_ORDER, calendar_month_days
 from reqm_local.profiles import MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING
 from reqm_local.esm import ESM_DELIVERY_STATUSES, parse_esm_rows
 
@@ -32,6 +32,11 @@ class LocalTests(unittest.TestCase):
 
     def tearDown(self):
         self.s.close();self.temp.cleanup()
+
+    def test_calendar_picker_uses_sunday_first_and_covers_month(self):
+        weeks=calendar_month_days(2026,10)
+        self.assertEqual(weeks[0],[0,0,0,0,1,2,3])
+        self.assertEqual([day for week in weeks for day in week if day],list(range(1,32)))
 
     def test_related_search_suggestions_include_direct_and_synonym_terms(self):
         suggestions=search_suggestions('전화',['010-1234-5678','서울 배송지','모트모트 상품'])

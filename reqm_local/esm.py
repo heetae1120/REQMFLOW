@@ -102,14 +102,14 @@ def _dpapi():
     return crypt32, kernel32
 
 
-def _protect(data: bytes) -> bytes:
+def _protect(data: bytes, description: str = "REQM FLOW credentials") -> bytes:
     if os.name != "nt":
         raise RuntimeError("로그인 정보 보호 저장은 Windows에서만 지원합니다.")
     source, source_buffer = _blob(data)
     output = _DataBlob()
     crypt32,kernel32 = _dpapi()
     if not crypt32.CryptProtectData(
-        ctypes.byref(source), "REQM FLOW ESM", None, None, None, 1, ctypes.byref(output)
+        ctypes.byref(source), description, None, None, None, 1, ctypes.byref(output)
     ):
         raise ctypes.WinError()
     try:
@@ -137,15 +137,15 @@ def _unprotect(data: bytes) -> bytes:
             kernel32.LocalFree(description)
 
 
-def save_credentials(path, user_id: str, password: str) -> None:
+def save_credentials(path, user_id: str, password: str, account_name: str = "ESM PLUS") -> None:
     user_id, password = user_id.strip(), password.strip()
     if not user_id or not password:
-        raise ValueError("ESM PLUS 아이디와 비밀번호를 모두 입력하세요.")
+        raise ValueError(f"{account_name} 아이디와 비밀번호를 모두 입력하세요.")
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps({"user_id": user_id, "password": password}, ensure_ascii=False).encode("utf-8")
     temporary = target.with_suffix(target.suffix + ".tmp")
-    temporary.write_bytes(_protect(payload))
+    temporary.write_bytes(_protect(payload, f"REQM FLOW {account_name}"))
     os.replace(temporary, target)
 
 
@@ -171,7 +171,10 @@ def download_esm_orders(user_id: str, password: str, start_day: str, end_day: st
     """Download every non-'전체' delivery status through a visible Edge session."""
     try:
         from selenium import webdriver
-        from selenium.common.exceptions import TimeoutException, UnexpectedAlertPresentException
+        from selenium.common.exceptions import (
+            ElementClickInterceptedException, StaleElementReferenceException,
+            TimeoutException, UnexpectedAlertPresentException,
+        )
         from selenium.webdriver.common.by import By
         from selenium.webdriver.support import expected_conditions as EC
         from selenium.webdriver.support.ui import Select, WebDriverWait
@@ -196,7 +199,54 @@ def download_esm_orders(user_id: str, password: str, start_day: str, end_day: st
     options.add_argument("--disable-features=msEdgeSidebarV2")
     driver = webdriver.Edge(options=options)
     wait = WebDriverWait(driver, 45)
+    stage = "브라우저 시작"
     try:
+        def wait_page_idle(timeout=25):
+            """Wait until ESM's Ajax request and visible loading masks have cleared."""
+            masks = ".blockUI, #loadingLayer, .loading-layer, .loadingLayer, .loading_wrap"
+            WebDriverWait(driver, timeout).until(lambda current: current.execute_script(
+                """
+                if (document.readyState !== 'complete') return false;
+                if (window.jQuery && window.jQuery.active) return false;
+                const nodes = Array.from(document.querySelectorAll(arguments[0]));
+                return !nodes.some((node) => {
+                    const style = window.getComputedStyle(node);
+                    const rect = node.getBoundingClientRect();
+                    return style.display !== 'none' && style.visibility !== 'hidden' &&
+                           Number(style.opacity || 1) !== 0 && rect.width > 0 && rect.height > 0;
+                });
+                """, masks
+            ))
+
+        def safe_click(element_or_locator, timeout=12):
+            """Click after scrolling; retry interception and finally use DOM click."""
+            deadline = time.time() + timeout
+            last_error = None
+            while time.time() < deadline:
+                try:
+                    element = (
+                        driver.find_element(*element_or_locator)
+                        if isinstance(element_or_locator, tuple) else element_or_locator
+                    )
+                    driver.execute_script(
+                        "arguments[0].scrollIntoView({block:'center',inline:'center'});", element
+                    )
+                    wait_page_idle(min(4, max(1, int(deadline - time.time()))))
+                    element.click()
+                    return
+                except (ElementClickInterceptedException, StaleElementReferenceException, TimeoutException) as exc:
+                    last_error = exc
+                    time.sleep(.35)
+            element = (
+                driver.find_element(*element_or_locator)
+                if isinstance(element_or_locator, tuple) else element_or_locator
+            )
+            try:
+                driver.execute_script("arguments[0].click();", element)
+            except Exception:
+                raise last_error or RuntimeError("버튼을 누르지 못했습니다.")
+
+        stage = "로그인"
         report("로그인", "ESM PLUS에 로그인하고 있습니다.")
         driver.get(ESM_LOGIN_URL)
         wait.until(EC.presence_of_element_located((By.ID, "typeMemberInputId01"))).send_keys(user_id)
@@ -206,8 +256,9 @@ def download_esm_orders(user_id: str, password: str, start_day: str, end_day: st
         login = next((button for button in buttons if "로그인" in button.text), None)
         if login is None:
             raise RuntimeError("ESM PLUS 로그인 버튼을 찾지 못했습니다.")
-        login.click()
+        safe_click(login)
         wait.until(lambda current: "signin.esmplus.com/login" not in current.current_url)
+        stage = "출고/배송관리 화면 열기"
         driver.get(ESM_DELIVERY_URL)
         wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "innerIFrame")))
         wait.until(EC.presence_of_element_located((By.ID, "searchAccount")))
@@ -225,24 +276,28 @@ def download_esm_orders(user_id: str, password: str, start_day: str, end_day: st
         set_date("searchSDT", start_day)
         set_date("searchEDT", end_day)
         for status in ESM_DELIVERY_STATUSES:
+            stage = f"{status} 조회"
             report("조회", f"{status} 주문을 조회하고 있습니다.")
+            wait_page_idle()
             Select(driver.find_element(By.ID, "searchDeliveryType")).select_by_visible_text(status)
             # Some statuses rebuild the dependent sub-status selector.
             time.sleep(.4)
-            driver.find_element(By.ID, "btnSearch").click()
+            safe_click((By.ID, "btnSearch"))
             wait.until(EC.presence_of_element_located((By.ID, "excelDown")))
-            time.sleep(1)
+            time.sleep(.5)
+            wait_page_idle()
             if not driver.find_elements(By.CSS_SELECTOR, "#dataGrid input[type='checkbox']"):
                 report("건너뜀", f"{status}: 다운로드할 주문이 없습니다.")
                 continue
             current = {path.name for path in target.iterdir() if path.is_file()}
-            driver.find_element(By.ID, "excelDown").click()
+            stage = f"{status} 엑셀 다운로드"
+            safe_click((By.ID, "excelDown"))
             confirm = WebDriverWait(driver, 8).until(lambda current_driver: next((
                 element for element in current_driver.find_elements(
                     By.XPATH, "//*[self::a or self::button][normalize-space()='확인']"
                 ) if element.is_displayed() and element.is_enabled()
             ), False))
-            confirm.click()
+            safe_click(confirm)
             try:
                 alert = WebDriverWait(driver, 2).until(EC.alert_is_present())
                 text = alert.text
@@ -265,5 +320,10 @@ def download_esm_orders(user_id: str, password: str, start_day: str, end_day: st
         if not files:
             raise RuntimeError("다운로드된 ESM PLUS 주문 파일이 없습니다. 조회 기간과 배송상태를 확인하세요.")
         return sorted(files, key=lambda path: path.stat().st_mtime)
+    except Exception as exc:
+        if isinstance(exc, RuntimeError) and not exc.__cause__:
+            raise
+        detail = (str(exc) or exc.__class__.__name__).splitlines()[0]
+        raise RuntimeError(f"{stage} 단계에서 ESM PLUS 자동화가 중단되었습니다. {detail}") from exc
     finally:
         driver.quit()
