@@ -724,7 +724,7 @@ class Operations:
                     self.db.execute('INSERT INTO request_lines VALUES(?,?,?,?,?)', (line_id,batch,order['id'],index,c['quantity']))
                     if request_format == 'wekeep':
                         channel = d['channel'].removeprefix('리큐엠_')
-                        rows.append([d['order_no'],channel,c['name'],c['quantity'],d['recipient'],d['phone'],d['postcode'],d['address'],d['memo'],'',line_id])
+                        rows.append([d['order_no'],channel,c['name'],c['quantity'],d['recipient'],d['phone'],d['postcode'],d['address'],d['memo'],''])
                     else:
                         rows.append([line_id,on,d['channel'],d['account'],d['order_no'],d['line_no'],d['recipient'],d['phone'],d['postcode'],d['address'],d['memo'],c['logistics_code'],c['name'],c['quantity']])
                 self.db.execute("UPDATE orders SET state='출고 요청' WHERE id=?", (order['id'],))
@@ -789,7 +789,11 @@ class Operations:
         return added, duplicates
 
     def _wekeep_result_line(self, values, headers, shipped_on):
-        value = lambda name: identifier(values[headers.index(name)]) if headers.index(name) < len(values) else ''
+        def value(name):
+            if name not in headers:
+                return ''
+            index=headers.index(name)
+            return identifier(values[index]) if index < len(values) else ''
         serial = value('일련번호')
         if serial:
             line = self.db.execute('SELECT * FROM request_lines WHERE id=?', (serial,)).fetchone()
@@ -806,9 +810,15 @@ class Operations:
             component = components[line['component']]
             if data.get('order_no') == order_no and identifier(component.get('name')) == product:
                 candidates.append(line)
-        if len(candidates) != 1:
-            raise ValueError(f'{order_no} / {product}: 일련번호가 없어 출고요청 행을 하나로 찾을 수 없습니다.')
-        return candidates[0], value('수량'), value('송장번호')
+        requested=quantity(value('수량'))
+        available=[]
+        for line in candidates:
+            shipped=self.db.execute('SELECT COALESCE(SUM(qty),0) FROM shipments WHERE line_id=?',(line['id'],)).fetchone()[0]
+            if line['qty']-shipped >= requested:
+                available.append(line)
+        if not available:
+            raise ValueError(f'{order_no} / {product}: 출고요청 행을 찾을 수 없거나 이미 전량 반영됐습니다.')
+        return available[0], value('수량'), value('송장번호')
 
     def import_results(self, path, on=None):
         rows = read_rows(path)

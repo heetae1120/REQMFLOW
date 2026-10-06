@@ -35,7 +35,7 @@ ORDER_COLUMNS = {
     'status': ['주문상태'], 'bundle': ['배송비 묶음번호'], 'shipping': ['배송비 합계', '배송비'],
 }
 REQUEST_COLUMNS = ['요청행ID', '출고요청일', '판매처', '계정', '주문번호', '상품주문번호', '수령인', '연락처', '우편번호', '주소', '배송메모', '물류품목코드', '품목명', '요청수량']
-WEKEEP_REQUEST_COLUMNS = ['주문번호', '판매처', '상품명', '수량', '수령자', '핸드폰', '우편번호', '주소', '배송메세지', '송장번호', '일련번호']
+WEKEEP_REQUEST_COLUMNS = ['주문번호', '판매처', '상품명', '수량', '수령자', '핸드폰', '우편번호', '주소', '배송메세지', '송장번호']
 RESULT_COLUMNS = ['요청행ID', '출고수량', '송장번호', '실제출고일']
 
 COLUMN_SEARCH_TERMS = {
@@ -620,7 +620,7 @@ def workbook_bytes(headers, rows, title='자료'):
 
 
 def wekeep_workbook_bytes(rows):
-    """Create the verified WeKeep layout with a stable request-line serial number."""
+    """Create the verified WeKeep layout without exposing internal request IDs."""
     book = Workbook()
     sheet = book.active
     sheet.title = '택배출고'
@@ -636,7 +636,7 @@ def wekeep_workbook_bytes(rows):
         cell.font = Font(bold=True)
         cell.fill = fill
         cell.alignment = Alignment(horizontal='center')
-    widths = [22, 14, 45, 9, 14, 18, 11, 55, 35, 18, 14]
+    widths = [22, 14, 45, 9, 14, 18, 11, 55, 35, 18]
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
     sheet.freeze_panes = 'A2'

@@ -16,7 +16,7 @@ from reqm_local.files import (
 )
 from reqm_local.service import Operations
 from reqm_local.shipping import ShippingCatalog, compact
-from reqm_local.ui_helpers import filter_combobox_choices, search_suggestions
+from reqm_local.ui_helpers import filter_combobox_choices, search_suggestions, tree_sort_value
 from reqm_local.workspace_cloud import export_workspace, import_workspace, workspace_digest
 from reqm_local.updater import RELEASE_API, prepare_update, version_tuple
 from reqm_local.desktop import (
@@ -41,6 +41,10 @@ class LocalTests(unittest.TestCase):
         weeks=calendar_month_days(2026,10)
         self.assertEqual(weeks[0],[0,0,0,0,1,2,3])
         self.assertEqual([day for week in weeks for day in week if day],list(range(1,32)))
+
+    def test_tree_sort_values_handle_numbers_and_text(self):
+        self.assertLess(tree_sort_value('2'),tree_sort_value('10'))
+        self.assertEqual(tree_sort_value('상품 A'),tree_sort_value('상품 a'))
 
     def test_header_row_preview_value_can_be_saved_as_its_row_number(self):
         self.assertEqual(matching_header_row_number('2 · 플랫폼 / 주문번호'),2)
@@ -302,11 +306,29 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(list(rows[0]),WEKEEP_REQUEST_COLUMNS)
         self.assertEqual(rows[1][0:9],('O1','스마트스토어','테스트',3,'가상수령인','01000000000','00123','테스트 주소',None))
         self.assertEqual(rows[1][9],None)
-        self.assertEqual(rows[0][10],'일련번호')
-        self.assertEqual(rows[1][10],line)
+        self.assertEqual(len(rows[0]),10)
+        self.assertNotIn('일련번호',rows[0])
         self.assertEqual(sheet.freeze_panes,'A2')
         self.assertEqual(sheet.column_dimensions['C'].width,45)
         book.close()
+
+    def test_wekeep_result_without_serial_matches_repeated_product_rows_in_order(self):
+        source=self.folder/'repeated.xlsx'
+        source.write_bytes(workbook_bytes(HEADERS,[
+            ['O-SAME','L1','같은상품','기본',1,1000,'수령인','01000000000','00123','주소','B1',0,'결제완료','2026-10-06'],
+            ['O-SAME','L2','같은상품','기본',1,1000,'수령인','01000000000','00123','주소','B2',0,'결제완료','2026-10-06'],
+        ]))
+        self.s.import_files([source],channel_override='오늘의집')
+        orders=self.s.orders()
+        for order in orders:self.map(order)
+        request=self.folder/'request-without-serial.xlsx'
+        self.s.request([order['id'] for order in orders],'2026-10-06',request)
+        book=load_workbook(request)
+        sheet=book.active
+        self.assertNotIn('일련번호',[cell.value for cell in sheet[1]])
+        sheet['J2']='TRACK-1';sheet['J3']='TRACK-2'
+        book.save(request);book.close()
+        self.assertEqual(self.s.import_results(request,'2026-10-06'),(2,0))
 
     def test_first_pass_column_analysis_and_letter_choices(self):
         headers=['주문번호','상품주문번호','상품명','수량','결제금액','수령자','연락처','우편번호','주소']

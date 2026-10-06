@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from decimal import Decimal, InvalidOperation
 import tkinter.font as tkfont
 
 
@@ -114,24 +115,44 @@ def autosize_tree(tree, *, minimum: int = 58, maximum: int = 420) -> None:
         tree.column(column, width=max(minimum, min(maximum, width)), stretch=False)
 
 
+def tree_sort_value(value):
+    """Return a stable value that sorts numbers naturally and text case-insensitively."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    number = text.replace(",", "")
+    try:
+        return 0, Decimal(number)
+    except InvalidOperation:
+        return 1, text.casefold()
+
+
+def bind_tree_sorting(tree) -> None:
+    """Make every heading toggle ascending/descending without losing selections."""
+    labels = {column: str(tree.heading(column, "text") or column) for column in tree["columns"]}
+    state = {"column": "", "descending": False}
+
+    def sort(column):
+        descending = not state["descending"] if state["column"] == column else False
+        rows = list(tree.get_children(""))
+        rows.sort(key=lambda item: tree_sort_value(tree.set(item, column)), reverse=descending)
+        for index, item in enumerate(rows):
+            tree.move(item, "", index)
+        state.update(column=column, descending=descending)
+        for name, label in labels.items():
+            suffix = " ▼" if name == column and descending else (" ▲" if name == column else "")
+            tree.heading(name, text=label + suffix)
+
+    for column in tree["columns"]:
+        tree.heading(column, command=lambda selected=column: sort(selected))
+    tree._reqm_sort = sort
+
+
 def bind_desktop_drag(tree) -> None:
     """Drag across rows to select a range; middle-button drag pans the table."""
-    state = {"anchor": "", "x": 0, "y": 0}
+    state = {"anchor": "", "x": 0, "y": 0, "dragging": False, "pointer_y": 0, "job": None}
 
-    def press(event):
-        row = tree.identify_row(event.y)
-        state["anchor"] = row
-        if not row:
-            tree.selection_remove(tree.selection())
-
-    def drag(event):
+    def select_to(row):
         anchor = state.get("anchor")
-        row = tree.identify_row(event.y)
         if not anchor or not row:
-            if event.y < 12:
-                tree.yview_scroll(-1, "units")
-            elif event.y > tree.winfo_height() - 12:
-                tree.yview_scroll(1, "units")
             return
         children = list(tree.get_children(""))
         try:
@@ -140,6 +161,47 @@ def bind_desktop_drag(tree) -> None:
             return
         low, high = sorted((start, end))
         tree.selection_set(children[low:high + 1])
+
+    def edge_scroll():
+        state["job"] = None
+        if not state["dragging"] or not tree.winfo_exists():
+            return
+        height = tree.winfo_height()
+        y = state["pointer_y"]
+        direction = -1 if y < 22 else (1 if y > height - 22 else 0)
+        if direction:
+            tree.yview_scroll(direction, "units")
+            row = tree.identify_row(2 if direction < 0 else max(2, height - 2))
+            select_to(row)
+            state["job"] = tree.after(55, edge_scroll)
+
+    def press(event):
+        row = tree.identify_row(event.y)
+        state["anchor"] = row
+        state["dragging"] = bool(row)
+        state["pointer_y"] = event.y
+        if not row:
+            tree.selection_remove(tree.selection())
+
+    def drag(event):
+        state["pointer_y"] = event.y
+        if state["dragging"] and state["job"] is None:
+            edge_scroll()
+        row = tree.identify_row(event.y)
+        if not row and event.y < 0:
+            row = tree.identify_row(2)
+        elif not row and event.y > tree.winfo_height():
+            row = tree.identify_row(max(2, tree.winfo_height() - 2))
+        select_to(row)
+
+    def release(_event):
+        state["dragging"] = False
+        if state["job"] is not None:
+            try:
+                tree.after_cancel(state["job"])
+            except Exception:
+                pass
+            state["job"] = None
 
     def pan_start(event):
         state["x"], state["y"] = event.x, event.y
@@ -162,6 +224,7 @@ def bind_desktop_drag(tree) -> None:
 
     tree.bind("<ButtonPress-1>", press, add="+")
     tree.bind("<B1-Motion>", drag, add="+")
+    tree.bind("<ButtonRelease-1>", release, add="+")
     tree.bind("<ButtonPress-2>", pan_start, add="+")
     tree.bind("<B2-Motion>", pan_move, add="+")
     tree.bind("<ButtonRelease-2>", pan_end, add="+")

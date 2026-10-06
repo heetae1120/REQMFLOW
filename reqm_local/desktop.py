@@ -23,7 +23,7 @@ from .files import (
 from .service import Operations
 from .cloud import login_and_load, load_catalog
 from .ui_helpers import (
-    autosize_tree, bind_desktop_drag, bind_wide_combobox, filter_combobox_choices,
+    autosize_tree, bind_desktop_drag, bind_tree_sorting, bind_wide_combobox, filter_combobox_choices,
     post_combobox, search_suggestions,
 )
 from .workspace_cloud import CloudWorkspace, WorkspaceConflict
@@ -33,7 +33,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.3'
+APP_VERSION = '1.9.4'
 
 
 CHANNEL_TO_INTERNAL = {
@@ -259,11 +259,15 @@ class Desktop:
         self.button(release,'선택 주문 파일 생성',self.request,style='Accent.TButton')
         self.search = tk.StringVar()
         self.filter = tk.StringVar(value='전체')
+        self.unmatched_first = tk.BooleanVar(value=False)
+        self.order_counts = tk.StringVar(value='전체 0건 · 미매칭 0건')
         filters = ttk.Frame(self.order_frame)
         filters.pack(fill='x',pady=(0,8))
         ttk.Label(filters,text='주문 검색',font=(self.font_family,10,'bold')).pack(side='left')
         ttk.Entry(filters,textvariable=self.search,width=38).pack(side='left',padx=8)
+        ttk.Label(filters,textvariable=self.order_counts,foreground='#475569',font=(self.font_family,9,'bold')).pack(side='left',padx=(0,10))
         ttk.Combobox(filters,textvariable=self.filter,values=['전체','중복 주문','검토 필요','출고 준비','출고 요청','부분 출고','출고 완료'],state='readonly',width=14).pack(side='left')
+        ttk.Checkbutton(filters,text='미매칭 상단',variable=self.unmatched_first,command=self.refresh_orders).pack(side='left',padx=(8,0))
         self.button(filters,'출고 준비 전체 선택',self.select_ready,style='Quiet.TButton')
         self.search.trace_add('write',self.on_search_changed)
         self.filter.trace_add('write',lambda *_:self.refresh_orders())
@@ -273,8 +277,8 @@ class Desktop:
         ttk.Label(self.order_frame,textvariable=self.detail,wraplength=1200,padding=(8,6),foreground='#64748B').pack(fill='x')
         self.table = self.tree(
             self.order_frame,
-            ['주문번호','이름','주소','연락처','상품명','매칭할 상품명'],
-            [155,110,330,135,300,320],
+            ['판매처','주문번호','이름','주소','연락처','상품명','매칭할 상품명'],
+            [125,155,110,330,135,300,320],
         )
         self.table.tag_configure('review',foreground='#BE123C',background='#FFF1F2')
         self.table.tag_configure('duplicate',foreground='#854D0E',background='#FEF9C3')
@@ -1119,18 +1123,23 @@ class Desktop:
         tree.grid(row=0,column=0,sticky='nsew'); vertical.grid(row=0,column=1,sticky='ns'); horizontal.grid(row=1,column=0,sticky='ew')
         frame.rowconfigure(0,weight=1); frame.columnconfigure(0,weight=1)
         bind_desktop_drag(tree)
+        bind_tree_sorting(tree)
         return tree
 
     def refresh_orders(self):
         self.rows={o['id']:o for o in self.service.orders()}
         self.table.delete(*self.table.get_children())
-        for key,o in self.rows.items():
+        ordered=list(self.rows.items())
+        if self.unmatched_first.get():
+            ordered.sort(key=lambda item:item[1]['state']!='검토 필요')
+        shown=0
+        for key,o in ordered:
             d=o['data']
             channel = INTERNAL_TO_CHANNEL.get(d['channel'],d['channel'])
             duplicate = '강제 승인' if d.get('force_shipping_approved') else (f"중복 {o['duplicate_count']}건" if o['duplicate_count'] > 1 else '')
             source_product=d.get('source_product',d['product']);source_option=d.get('source_option',d['option'])
             converted=' / '.join(f"{c.get('name') or c.get('code')} [{c.get('logistics_code') or c.get('code')}]" for c in o['components'])
-            values=[d['order_no'],d['recipient'],f"{d.get('postcode','')} {d['address']}".strip(),d['phone'],f"{source_product} / {source_option}",converted]
+            values=[channel,d['order_no'],d['recipient'],f"{d.get('postcode','')} {d['address']}".strip(),d['phone'],f"{source_product} / {source_option}",converted]
             selected_filter = self.filter.get()
             if selected_filter == '중복 주문' and o['duplicate_count'] <= 1:
                 continue
@@ -1148,6 +1157,9 @@ class Desktop:
             elif o['duplicate_count'] > 1: tags.append('duplicate')
             elif o['issue']: tags.append('review')
             self.table.insert('', 'end',iid=key,values=values,tags=tags)
+            shown+=1
+        unmatched=sum(order['state']=='검토 필요' for order in self.rows.values())
+        self.order_counts.set(f'전체 {len(self.rows):,}건 · 미매칭 {unmatched:,}건 · 표시 {shown:,}건')
         self.root.after_idle(lambda:autosize_tree(self.table))
 
     def refresh(self):
