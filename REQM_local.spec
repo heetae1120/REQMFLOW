@@ -1,5 +1,12 @@
 # Build: pyinstaller --noconfirm REQM_local.spec
 from pathlib import Path
+import sys
+
+# The repository also contains a top-level ``supabase`` data directory. Put the
+# installed dependencies first so PyInstaller resolves the Supabase Python SDK
+# instead of treating that data directory as a namespace package.
+sys.path.insert(0, str(Path('.builddeps').resolve()))
+
 datas=[('supabase/ecount_migration/data','reference_data'),('assets/fonts','assets/fonts'),('assets/branding','assets/branding')]
 if Path('config.json').exists():
     datas.append(('config.json','.'))

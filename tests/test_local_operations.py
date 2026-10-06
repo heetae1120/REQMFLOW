@@ -18,6 +18,7 @@ from reqm_local.ui_helpers import filter_combobox_choices, search_suggestions
 from reqm_local.workspace_cloud import export_workspace, import_workspace, workspace_digest
 from reqm_local.updater import RELEASE_API, prepare_update, version_tuple
 from reqm_local.desktop import FIELD_LABELS, MAPPING_FIELD_ORDER
+from reqm_local.profiles import MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING
 
 REFERENCE=Path(__file__).resolve().parents[1]/'supabase/ecount_migration/data'
 HEADERS=['주문번호','상품주문번호','상품명','옵션정보','수량','최종 상품별 총 주문금액','수취인명','수취인연락처1','우편번호','통합배송지','배송비 묶음번호','배송비 합계','주문상태','결제일']
@@ -340,6 +341,42 @@ class LocalTests(unittest.TestCase):
             '주문일자', '판매처주문번호', '상품주문번호', '상품명', '옵션', '수량', '금액', '배송비',
             '수령인', '전화번호', '우편번호', '주소 1', '주소 2', '배송메모',
         ])
+
+    def test_smartstore_erp_mapping_is_directly_below_smartstore(self):
+        self.assertEqual(MATCHING_CHANNELS[:3],['스마트스토어',SMARTSTORE_ERP_MAPPING,'쌤몰'])
+
+    def test_smartstore_erp_file_replaces_actual_shipment_for_erp(self):
+        _,order=self.import_order(q=2,amount=20000)
+        line=self.request(order)
+        erp_profile=next(profile for profile in self.s.settings['profiles'] if profile.get('purpose')=='smartstore_erp')
+        erp_profile.update({
+            'enabled':True,'header_row':1,'filename_hints':['smartstore-erp'],
+            'columns':{
+                'order_no':['주문번호'],'line_no':['상품주문번호'],'product':['상품명'],
+                'option':['옵션'],'quantity':['수량'],'amount':['금액'],
+            },
+        })
+        actual=self.folder/'smartstore-result.xlsx'
+        actual.write_bytes(workbook_bytes(RESULT_COLUMNS,[[line,2,'TRACK-1','2026-10-06']]))
+        self.assertEqual(self.s.import_results(actual),(0,0))
+        self.assertEqual(self.s.db.execute('SELECT COUNT(*) FROM shipments').fetchone()[0],0)
+        erp_source=self.folder/'smartstore-erp.xlsx'
+        erp_source.write_bytes(workbook_bytes(
+            ['주문번호','상품주문번호','상품명','옵션','수량','금액'],
+            [['O1','A1','테스트상품','기본',2,20000]],
+        ))
+        self.assertEqual(self.s.import_smartstore_erp(erp_source,'2026-10-06'),(1,0))
+        renamed_source=self.folder/'smartstore-erp-redownloaded.xlsx'
+        renamed_source.write_bytes(erp_source.read_bytes())
+        self.assertEqual(self.s.import_smartstore_erp(renamed_source,'2026-10-06'),(0,1))
+        entries=self.s.pending_erp_entries('2026-10-06')
+        self.assertEqual([(entry['source'],entry['amount']) for entry in entries],[('스마트스토어 ERP','20000')])
+        target=self.folder/'smartstore-erp-export.xlsx'
+        self.s.export_erp('2026-10-06','2026-10-06',target)
+        book=load_workbook(target,data_only=True)
+        rows=list(book.active.values)[1:]
+        self.assertEqual(sum(row[15]*row[16] for row in rows),20000)
+        book.close()
 
     def test_explicit_address_columns_are_joined_with_one_space(self):
         profile = {

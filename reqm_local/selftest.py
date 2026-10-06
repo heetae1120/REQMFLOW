@@ -33,6 +33,9 @@ def run(folder):
         root=tk.Tk();root.withdraw();app=Desktop(root,service);root.update_idletasks()
         assert root.title().startswith('REQM FLOW')
         assert app.font_family == 'Pretendard'
+        assert app.matching_sites.get(1) == '스마트스토어 ERP매칭'
+        assert tuple(app.confirmed_shipments['columns']) == ('구분','출고일','판매처','주문번호','이름','품목','수량','송장번호')
+        assert tuple(app.erp_shipments['columns'])[:2] == ('구분','실제 출고일')
         assert len(app.table.get_children())==1
         app.table.selection_set(row['id']);app.show_detail()
         assert len(app.history.get_children())==2

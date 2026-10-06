@@ -8,9 +8,13 @@ SALES_CHANNELS = [
     '와이즐리', '모트모트',
 ]
 
+SMARTSTORE_ERP_MAPPING = '스마트스토어 ERP매칭'
+MATCHING_CHANNELS = [SALES_CHANNELS[0], SMARTSTORE_ERP_MAPPING, *SALES_CHANNELS[1:]]
+
 
 def profile(name, hints, columns=None, *, required=None, password='tkdtkd8911!@@', enabled=True,
-            excludes=None, content_rule=None, combine=None, sum_columns=None, amount_is_unit=False):
+            excludes=None, content_rule=None, combine=None, sum_columns=None, amount_is_unit=False,
+            purpose='order'):
     columns = columns or {}
     required = required or []
     return {
@@ -21,6 +25,7 @@ def profile(name, hints, columns=None, *, required=None, password='tkdtkd8911!@@
         'excludes': excludes or [], 'content_rule': content_rule,
         'combine': combine or {}, 'sum_columns': sum_columns or {},
         'amount_is_unit': amount_is_unit,
+        'purpose': purpose,
     }
 
 
@@ -32,6 +37,11 @@ PROFILE_PRESETS = [
         'memo':['배송메세지','배송메시지'],'paid_at':['결제일'],'status':['주문상태'],
         'bundle':['배송비 묶음번호'],'shipping':['배송비 합계'],
     },password='1234',excludes=[{'column':'배송속성','equals':'N배송'}]),
+    profile(SMARTSTORE_ERP_MAPPING,['스마트스토어_ERP','스마트스토어 ERP'],{
+        'order_no':['주문번호'],'line_no':['상품주문번호'],'product':['상품명'],'option':['옵션정보','옵션'],
+        'quantity':['수량'],'amount':['최종 상품별 총 주문금액','결제금액','금액'],
+        'paid_at':['결제일','주문일자'],
+    },required=[],password='1234',enabled=False,purpose='smartstore_erp'),
     profile('쌤몰',['o_20260721_1509_readyDeliveryList.csv','readyDeliveryList'],{
         'order_no':['배송번호'],'line_no':['품목별 주문번호'],'product':['주문상품명(기간할인 제목+버전)'],
         'option':['상품옵션'],'quantity':['주문품목 수량'],'amount':['판매가격'],'recipient':['수령인명'],
@@ -148,6 +158,7 @@ PROFILE_PRESETS = [
 
 PRESET_COLUMN_INDEXES = {
     '스마트스토어': {'order_no':1,'line_no':0,'product':16,'option':20,'quantity':21,'amount':27,'recipient':13,'phone':48,'postcode':52,'address':50,'paid_at':29,'status':3,'bundle':42,'shipping':45},
+    SMARTSTORE_ERP_MAPPING: {},
     '쌤몰': {'order_no':0,'line_no':1,'product':3,'option':4,'quantity':6,'amount':22,'recipient':8,'phone':10,'postcode':11,'memo':15,'paid_at':28,'status':26,'bundle':0,'shipping':16},
     '29CM': {'order_no':3,'line_no':0,'source_item_code':7,'product':8,'option':10,'quantity':11,'amount':21,'recipient':6,'phone':22,'postcode':23,'address':24,'memo':25,'paid_at':29,'status':33,'bundle':1},
     '이지웰': {'order_no':3,'line_no':5,'source_item_code':10,'product':11,'option':13,'quantity':14,'amount':45,'recipient':36,'phone':37,'postcode':38,'address':39,'memo':40,'paid_at':2,'status':21,'bundle':6,'shipping':44},
@@ -182,6 +193,7 @@ def merge_profile_presets(settings):
             # 금액 단위와 배송비 합산은 열 이름 사용자 지정과 무관한 판매처 규칙이다.
             existing['amount_is_unit'] = preset.get('amount_is_unit', False)
             existing['sum_columns'] = preset.get('sum_columns', {})
+            existing['purpose'] = preset.get('purpose', 'order')
             continue
         if existing:
             existing.clear(); existing.update(preset)
