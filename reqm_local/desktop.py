@@ -16,7 +16,7 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 from .files import (
     ORDER_COLUMNS, RESULT_COLUMNS, analyze_order_columns, choice_column_index,
     column_choice, identifier, profile_column_choices, read_rows, related_column_choices,
-    reference_data_path, sample_header_names, settings_at, workbook_bytes,
+    reference_data_path, sample_header_names, settings_at, workbook_bytes, wekeep_workbook_bytes,
 )
 from .service import Operations
 from .cloud import login_and_load, load_catalog
@@ -30,7 +30,7 @@ from .column_matching import match_columns
 from .shipping import compact, channel_key
 
 
-APP_VERSION = '1.7.0'
+APP_VERSION = '1.7.1'
 
 
 CHANNEL_TO_INTERNAL = {
@@ -276,14 +276,15 @@ class Desktop:
         result_tabs.add(amount_frame,text='2  금액 매칭 및 세트 분리')
         result_tabs.add(erp_frame,text='3  ERP 파일 생성 및 다운로드')
         ttk.Label(result_input,text='당일 출고건 확인',font=(self.font_family,18,'bold')).pack(anchor='w')
-        ttk.Label(result_input,text='일반 판매처 실제출고 파일과 스마트스토어 ERP 원본을 각각 입력합니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
+        ttk.Label(result_input,text='당일 생성한 출고요청은 자동으로 불러오거나, 위킵 반환 파일로 직접 반영할 수 있습니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
         result_card = ttk.LabelFrame(result_input,text='입력 파일',padding=18)
         result_card.pack(fill='x')
         ttk.Label(result_card,text='입력 구분',foreground='#64748B').grid(row=0,column=0,sticky='w')
-        ttk.Label(result_card,text='일반 판매처: 실제출고 결과 · 스마트스토어: ERP 입력 원본',font=(self.font_family,10,'bold')).grid(row=1,column=0,sticky='w',pady=(2,14))
-        ttk.Label(result_card,text='일반 실제출고에서는 스마트스토어 행을 제외하고, 스마트스토어는 전용 ERP매칭을 사용합니다.',foreground='#64748B').grid(row=2,column=0,sticky='w')
+        ttk.Label(result_card,text='일반 판매처: 당일 출고요청 자동 반영 또는 위킵 출고파일 · 스마트스토어: ERP 입력 원본',font=(self.font_family,10,'bold')).grid(row=1,column=0,sticky='w',pady=(2,14))
+        ttk.Label(result_card,text='자동·파일 반영 모두 스마트스토어를 제외합니다. 위킵 반환 파일은 송장번호를 채운 출고요청 양식을 사용합니다.',foreground='#64748B').grid(row=2,column=0,sticky='w')
         result_actions = ttk.Frame(result_card);result_actions.grid(row=0,column=1,rowspan=3,sticky='e',padx=(40,0))
-        self.button(result_actions,'빈 양식 저장',self.result_template,style='Quiet.TButton')
+        self.button(result_actions,'위킵 출고양식 저장',self.result_template,style='Quiet.TButton')
+        self.button(result_actions,'당일 출고건 자동 불러오기',self.auto_results,style='Accent.TButton')
         self.button(result_actions,'일반 실제출고 입력',self.results,style='Accent.TButton')
         self.button(result_actions,'스마트스토어 ERP 입력',self.smartstore_erp_results,style='Accent.TButton')
         result_card.columnconfigure(0,weight=1)
@@ -1481,13 +1482,22 @@ class Desktop:
             messagebox.showinfo('파일 생성',f'{batch}\n출고요청 파일을 저장했습니다. 물류사 양식을 확인한 뒤 전달하세요.')
 
     def result_template(self):
-        path=self.save_path('물류_실제출고_결과양식.xlsx')
-        if path:Path(path).write_bytes(workbook_bytes(RESULT_COLUMNS,[],'출고결과'))
+        path=self.save_path('위킵_출고결과_양식.xlsx')
+        if path:Path(path).write_bytes(wekeep_workbook_bytes([]))
+
+    def auto_results(self):
+        selected_day=self.erp_ship_day.get()
+        new,duplicate=self.service.auto_import_shipments(selected_day);self.refresh()
+        messagebox.showinfo(
+            '자동 반영 완료',
+            f'{selected_day} 출고요청 기준\n실제 출고 {new}행 · 기존 반영 {duplicate}행\n스마트스토어는 자동으로 제외했습니다.',
+            parent=self.root,
+        )
 
     def results(self):
         path=filedialog.askopenfilename(filetypes=[('물류 결과','*.xlsx *.xls *.csv')])
         if path:
-            new,duplicate=self.service.import_results(path);self.refresh()
+            new,duplicate=self.service.import_results(path,self.erp_ship_day.get());self.refresh()
             messagebox.showinfo('반영 완료',f'실제 출고 {new}행 · 중복 제외 {duplicate}행')
 
     def smartstore_erp_results(self):

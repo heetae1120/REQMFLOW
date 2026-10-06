@@ -146,10 +146,10 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(self.s.settings['profiles'][0]['detected_headers']['1'],'주문번호')
         self.assertEqual(workspace_digest(export_workspace(self.s)),digest)
 
-    def import_order(self, q=3, amount=10001, line='A1', fee=3000, bundle='B1', product='테스트상품'):
+    def import_order(self, q=3, amount=10001, line='A1', fee=3000, bundle='B1', product='테스트상품', channel='오늘의집'):
         path=self.folder/f'{line}.xlsx'
         path.write_bytes(workbook_bytes(HEADERS,[['O1',line,product,'기본',q,amount,'가상수령인','01000000000','00123','테스트 주소',bundle,fee,'결제완료','2026-09-30']]))
-        self.s.import_files([path])
+        self.s.import_files([path],channel_override=channel)
         return path,next(o for o in self.s.orders() if o['data']['line_no']==line)
 
     def map(self, order, components=None):
@@ -234,11 +234,11 @@ class LocalTests(unittest.TestCase):
 
     def test_duplicate_and_changed_orders_are_allowed_in_test_mode(self):
         path,o=self.import_order()
-        self.assertEqual(self.s.import_files([path]),(1,0))
+        self.assertEqual(self.s.import_files([path],channel_override='오늘의집'),(1,0))
         duplicates=self.s.orders()
         self.assertEqual([order['duplicate_count'] for order in duplicates[:2]],[2,2])
         book=load_workbook(path);book.active['F2']=20000;book.save(path);book.close()
-        self.assertEqual(self.s.import_files([path]),(1,0))
+        self.assertEqual(self.s.import_files([path],channel_override='오늘의집'),(1,0))
         self.assertEqual(len(self.s.orders()),3)
 
     def test_no_request_for_unmapped_order(self):
@@ -247,7 +247,7 @@ class LocalTests(unittest.TestCase):
         self.assertFalse((self.folder/'bad.xlsx').exists())
 
     def test_request_uses_wekeep_layout(self):
-        _,order=self.import_order();self.request(order)
+        _,order=self.import_order(channel='리큐엠_스마트스토어');line=self.request(order)
         book=load_workbook(self.folder/'request.xlsx',data_only=True)
         sheet=book['택배출고']
         rows=list(sheet.values)
@@ -255,7 +255,7 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(rows[1][0:9],('O1','스마트스토어','테스트',3,'가상수령인','01000000000','00123','테스트 주소',None))
         self.assertEqual(rows[1][9],None)
         self.assertEqual(rows[0][10],'일련번호')
-        self.assertIsNone(rows[1][10])
+        self.assertEqual(rows[1][10],line)
         self.assertEqual(sheet.freeze_panes,'A2')
         self.assertEqual(sheet.column_dimensions['C'].width,45)
         book.close()
@@ -336,6 +336,33 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(book['택배출고']['H2'].value,'강원 원주시 가곡로 50 1006동 703호 (원주롯데캐슬더퍼스트)')
         book.close()
 
+    def test_auto_imports_same_day_requests_and_always_excludes_smartstore(self):
+        _,general=self.import_order(line='GENERAL')
+        data=general['data'];data['channel']='오늘의집'
+        with self.s.db:self.s.db.execute('UPDATE orders SET data=? WHERE id=?',(json.dumps(data,ensure_ascii=False),general['id']))
+        general=next(order for order in self.s.orders() if order['id']==general['id'])
+        general_line=self.request(general)
+        _,smartstore=self.import_order(line='SMARTSTORE',channel='리큐엠_스마트스토어')
+        smartstore_line=self.request(smartstore)
+        self.assertEqual(self.s.auto_import_shipments('2026-10-01'),(1,0))
+        rows=self.s.db.execute('SELECT line_id,tracking,day FROM shipments').fetchall()
+        self.assertEqual([(row['line_id'],row['tracking'],row['day']) for row in rows],[(general_line,'','2026-10-01')])
+        self.assertNotEqual(general_line,smartstore_line)
+        self.assertEqual(self.s.auto_import_shipments('2026-10-01'),(0,1))
+
+    def test_wekeep_request_file_can_be_reused_as_actual_shipment_result(self):
+        _,order=self.import_order()
+        data=order['data'];data['channel']='오늘의집'
+        with self.s.db:self.s.db.execute('UPDATE orders SET data=? WHERE id=?',(json.dumps(data,ensure_ascii=False),order['id']))
+        order=next(current for current in self.s.orders() if current['id']==order['id'])
+        line=self.request(order)
+        book=load_workbook(self.folder/'request.xlsx')
+        book['택배출고']['J2']='TRACK-WEKEEP'
+        book.save(self.folder/'wekeep-result.xlsx');book.close()
+        self.assertEqual(self.s.import_results(self.folder/'wekeep-result.xlsx','2026-10-02'),(1,0))
+        shipment=self.s.db.execute('SELECT line_id,tracking,day FROM shipments').fetchone()
+        self.assertEqual((shipment['line_id'],shipment['tracking'],shipment['day']),(line,'TRACK-WEKEEP','2026-10-02'))
+
     def test_mapping_fields_have_fixed_requested_order(self):
         self.assertEqual([FIELD_LABELS[field] for field in MAPPING_FIELD_ORDER], [
             '주문일자', '판매처주문번호', '상품주문번호', '상품명', '옵션', '수량', '금액', '배송비',
@@ -346,7 +373,7 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(MATCHING_CHANNELS[:3],['스마트스토어',SMARTSTORE_ERP_MAPPING,'쌤몰'])
 
     def test_smartstore_erp_file_replaces_actual_shipment_for_erp(self):
-        _,order=self.import_order(q=2,amount=20000)
+        _,order=self.import_order(q=2,amount=20000,channel='리큐엠_스마트스토어')
         line=self.request(order)
         erp_profile=next(profile for profile in self.s.settings['profiles'] if profile.get('purpose')=='smartstore_erp')
         erp_profile.update({
@@ -422,7 +449,7 @@ class LocalTests(unittest.TestCase):
                          [('EVENT-A',3,'22200'),('EVENT-GIFT',3,'1500')])
         second=self.folder/'event-second.xlsx'
         second.write_bytes(workbook_bytes(HEADERS,[['O2','EVENT-2','행사 전 상품','기본',1,12000,'가상수령인','01000000000','00123','테스트 주소','B2',0,'결제완료','2026-10-01']]))
-        self.s.import_files([second])
+        self.s.import_files([second],channel_override='오늘의집')
         imported=next(item for item in self.s.orders() if item['data']['line_no']=='EVENT-2')['data']
         self.assertEqual(imported['event_rule_id'],rule)
         self.assertEqual(imported['amount'],'7900')
@@ -472,7 +499,7 @@ class LocalTests(unittest.TestCase):
             sku_mappings=[{'item_code':'BATTERY','product_name':'위킵 배터리','sku_no':'SKU-B','is_active':True},
                           {'item_code':'CABLE','product_name':'위킵 케이블','sku_no':'SKU-C','is_active':True}],
         )
-        _,order=self.import_order(q=2,amount=20000,product='배터리 케이블')
+        _,order=self.import_order(q=2,amount=20000,product='배터리 케이블',channel='리큐엠_스마트스토어')
         ready=self.s.orders()[0]
         self.assertEqual(ready['state'],'출고 준비')
         self.assertEqual([(row['code'],row['quantity'],row['sku_no']) for row in ready['components']],
@@ -491,7 +518,7 @@ class LocalTests(unittest.TestCase):
                       'components':[{'item_code':'BATTERY'},{'item_code':'CABLE'}],'is_active':True}],
             sku_mappings=[{'item_code':'BATTERY','product_name':'위킵 배터리','sku_no':'SKU-B','is_active':True}],
         )
-        _,order=self.import_order(q=2,product='배터리 케이블')
+        _,order=self.import_order(q=2,product='배터리 케이블',channel='리큐엠_스마트스토어')
         blocked=self.s.orders()[0]
         self.assertEqual(blocked['state'],'검토 필요')
         self.assertIn('위킵 SKU 미등록 CABLE',blocked['issue'])

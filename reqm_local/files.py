@@ -607,7 +607,7 @@ def workbook_bytes(headers, rows, title='자료'):
 
 
 def wekeep_workbook_bytes(rows):
-    """Create the verified WeKeep layout while leaving serial-number values blank."""
+    """Create the verified WeKeep layout with a stable request-line serial number."""
     book = Workbook()
     sheet = book.active
     sheet.title = '택배출고'

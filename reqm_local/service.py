@@ -16,7 +16,10 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 
 from ecount_sales_core import ReferenceCatalog, SmartStoreOrder, convert_orders, normalize_source
-from .files import parse_orders, read_rows, identifier, workbook_bytes, wekeep_workbook_bytes, REQUEST_COLUMNS, settings_at
+from .files import (
+    parse_orders, read_rows, identifier, workbook_bytes, wekeep_workbook_bytes,
+    REQUEST_COLUMNS, WEKEEP_REQUEST_COLUMNS, settings_at,
+)
 
 
 SMARTSTORE_CHANNEL = '리큐엠_스마트스토어'
@@ -717,7 +720,7 @@ class Operations:
                     self.db.execute('INSERT INTO request_lines VALUES(?,?,?,?,?)', (line_id,batch,order['id'],index,c['quantity']))
                     if request_format == 'wekeep':
                         channel = d['channel'].removeprefix('리큐엠_')
-                        rows.append([d['order_no'],channel,c['name'],c['quantity'],d['recipient'],d['phone'],d['postcode'],d['address'],d['memo'],'',''])
+                        rows.append([d['order_no'],channel,c['name'],c['quantity'],d['recipient'],d['phone'],d['postcode'],d['address'],d['memo'],'',line_id])
                     else:
                         rows.append([line_id,on,d['channel'],d['account'],d['order_no'],d['line_no'],d['recipient'],d['phone'],d['postcode'],d['address'],d['memo'],c['logistics_code'],c['name'],c['quantity']])
                 self.db.execute("UPDATE orders SET state='출고 요청' WHERE id=?", (order['id'],))
@@ -726,51 +729,119 @@ class Operations:
             self.event('출고요청 파일 생성', batch)
         return batch
 
-    def import_results(self, path):
+    def _record_shipment(self, line, shipped_on, shipped_quantity, tracking):
+        q = quantity(shipped_quantity)
+        order_row = self.db.execute('SELECT data,components FROM orders WHERE id=?', (line['order_id'],)).fetchone()
+        if not order_row:
+            raise ValueError('출고요청에 연결된 주문을 찾지 못했습니다.')
+        order_data = json.loads(order_row['data'])
+        if is_smartstore_channel(order_data.get('channel')):
+            return 'smartstore'
+        old = self.db.execute(
+            'SELECT qty FROM shipments WHERE line_id=? AND tracking=? AND day=?',
+            (line['id'],tracking,shipped_on),
+        ).fetchone()
+        if old:
+            if old[0] != q:
+                raise ValueError('같은 출고 결과의 수량이 변경되었습니다. 이번 입력은 취소됩니다.')
+            return 'duplicate'
+        done = self.db.execute('SELECT COALESCE(SUM(qty),0) FROM shipments WHERE line_id=?', (line['id'],)).fetchone()[0]
+        if done + q > line['qty']:
+            raise ValueError('출고수량이 요청수량을 초과합니다. 이번 입력은 취소됩니다.')
+        component = json.loads(order_row['components'])[line['component']]
+        full = number(component['amount'])
+        cumulative = lambda value: (full*Decimal(value)/Decimal(component['quantity'])).quantize(Decimal('1'),rounding=ROUND_HALF_UP)
+        suggested_amount = cumulative(done+q)-cumulative(done)
+        self.db.execute(
+            'INSERT INTO shipments(id,line_id,qty,tracking,day,erp_id,erp_amount) VALUES(?,?,?,?,?,NULL,?)',
+            (uuid.uuid4().hex,line['id'],q,tracking,shipped_on,str(suggested_amount)),
+        )
+        totals = self.db.execute('SELECT SUM(qty) FROM request_lines WHERE order_id=?', (line['order_id'],)).fetchone()[0]
+        shipped = self.db.execute(
+            'SELECT COALESCE(SUM(s.qty),0) FROM shipments s JOIN request_lines r ON s.line_id=r.id WHERE r.order_id=?',
+            (line['order_id'],),
+        ).fetchone()[0]
+        self.db.execute('UPDATE orders SET state=? WHERE id=?', ('출고 완료' if totals == shipped else '부분 출고',line['order_id']))
+        return 'added'
+
+    def auto_import_shipments(self, on):
+        """Confirm unprocessed non-SmartStore request lines created on the selected day."""
+        shipped_on = day(on)
+        rows = self.db.execute('''SELECT r.* FROM request_lines r
+            JOIN requests q ON q.id=r.request_id
+            WHERE q.day=? ORDER BY r.rowid''', (shipped_on,)).fetchall()
+        added = duplicates = smartstore_skipped = 0
+        with self.db:
+            for line in rows:
+                if self.db.execute('SELECT 1 FROM shipments WHERE line_id=? LIMIT 1', (line['id'],)).fetchone():
+                    duplicates += 1
+                    continue
+                result = self._record_shipment(line,shipped_on,line['qty'],'')
+                if result == 'added':
+                    added += 1
+                elif result == 'smartstore':
+                    smartstore_skipped += 1
+            self.event('당일 출고건 자동 반영',f'신규 {added}, 기존 {duplicates}, 스마트스토어 제외 {smartstore_skipped}, 출고일 {shipped_on}')
+        return added, duplicates
+
+    def _wekeep_result_line(self, values, headers, shipped_on):
+        value = lambda name: identifier(values[headers.index(name)]) if headers.index(name) < len(values) else ''
+        serial = value('일련번호')
+        if serial:
+            line = self.db.execute('SELECT * FROM request_lines WHERE id=?', (serial,)).fetchone()
+            if not line:
+                raise ValueError(f'알 수 없는 일련번호: {serial}')
+            return line, value('수량'), value('송장번호')
+        order_no, product = value('주문번호'), value('상품명')
+        candidates = []
+        for line in self.db.execute('''SELECT r.* FROM request_lines r
+            JOIN requests q ON q.id=r.request_id JOIN orders o ON o.id=r.order_id
+            WHERE q.day<=? ORDER BY r.rowid''', (shipped_on,)):
+            order = self.db.execute('SELECT data,components FROM orders WHERE id=?', (line['order_id'],)).fetchone()
+            data, components = json.loads(order['data']), json.loads(order['components'])
+            component = components[line['component']]
+            if data.get('order_no') == order_no and identifier(component.get('name')) == product:
+                candidates.append(line)
+        if len(candidates) != 1:
+            raise ValueError(f'{order_no} / {product}: 일련번호가 없어 출고요청 행을 하나로 찾을 수 없습니다.')
+        return candidates[0], value('수량'), value('송장번호')
+
+    def import_results(self, path, on=None):
         rows = read_rows(path)
         columns = self.settings['result_columns']
         headers = [identifier(x) for x in rows[0]]
-        if not set(columns.values()).issubset(headers):
+        legacy_format = set(columns.values()).issubset(headers)
+        wekeep_format = set(WEKEEP_REQUEST_COLUMNS).issubset(headers)
+        if not legacy_format and not wekeep_format:
             raise ValueError('물류 결과 헤더가 맞지 않습니다. 결과 양식 또는 설정을 확인하세요.')
         added = duplicates = smartstore_skipped = 0
         with self.db:
             for row in rows[1:]:
                 if not any(x not in (None, '') for x in row):
                     continue
-                d = {key: identifier(row[headers.index(value)]) if headers.index(value) < len(row) else '' for key,value in columns.items()}
-                line_id, tracking, shipped_on = d['요청행ID'], d['송장번호'], day(d['실제출고일'])
-                q = quantity(d['출고수량'])
+                if wekeep_format:
+                    if not on:
+                        raise ValueError('위킵 출고파일을 반영할 실제 출고일이 필요합니다.')
+                    shipped_on = day(on)
+                    line, q, tracking = self._wekeep_result_line(row,headers,shipped_on)
+                    line_id = line['id']
+                else:
+                    d = {key: identifier(row[headers.index(value)]) if headers.index(value) < len(row) else '' for key,value in columns.items()}
+                    line_id, tracking, shipped_on = d['요청행ID'], d['송장번호'], day(d['실제출고일'])
+                    q = d['출고수량']
+                    line = self.db.execute('SELECT * FROM request_lines WHERE id=?', (line_id,)).fetchone()
                 if not tracking:
                     raise ValueError('송장번호가 필요합니다.')
-                line = self.db.execute('SELECT * FROM request_lines WHERE id=?', (line_id,)).fetchone()
                 if not line:
                     raise ValueError(f'알 수 없는 요청행ID: {line_id}')
-                order_data = json.loads(self.db.execute('SELECT data FROM orders WHERE id=?', (line['order_id'],)).fetchone()['data'])
-                if self.smartstore_erp_enabled() and is_smartstore_channel(order_data.get('channel')):
+                result = self._record_shipment(line,shipped_on,q,tracking)
+                if result == 'smartstore':
                     smartstore_skipped += 1
                     continue
-                old = self.db.execute('SELECT qty FROM shipments WHERE line_id=? AND tracking=? AND day=?', (line_id,tracking,shipped_on)).fetchone()
-                if old:
-                    if old[0] != q:
-                        raise ValueError('같은 출고 결과의 수량이 변경되었습니다. 이번 입력은 취소됩니다.')
+                if result == 'duplicate':
                     duplicates += 1
                     continue
-                done = self.db.execute('SELECT COALESCE(SUM(qty),0) FROM shipments WHERE line_id=?', (line_id,)).fetchone()[0]
-                if done + q > line['qty']:
-                    raise ValueError('출고수량이 요청수량을 초과합니다. 이번 입력은 취소됩니다.')
-                order_row = self.db.execute('SELECT components FROM orders WHERE id=?', (line['order_id'],)).fetchone()
-                component = json.loads(order_row['components'])[line['component']]
-                full = number(component['amount'])
-                cumulative = lambda value: (full*Decimal(value)/Decimal(component['quantity'])).quantize(Decimal('1'),rounding=ROUND_HALF_UP)
-                suggested_amount = cumulative(done+q)-cumulative(done)
-                self.db.execute(
-                    'INSERT INTO shipments(id,line_id,qty,tracking,day,erp_id,erp_amount) VALUES(?,?,?,?,?,NULL,?)',
-                    (uuid.uuid4().hex,line_id,q,tracking,shipped_on,str(suggested_amount)),
-                )
                 added += 1
-                totals = self.db.execute('SELECT SUM(qty) FROM request_lines WHERE order_id=?', (line['order_id'],)).fetchone()[0]
-                shipped = self.db.execute('SELECT SUM(s.qty) FROM shipments s JOIN request_lines r ON s.line_id=r.id WHERE r.order_id=?', (line['order_id'],)).fetchone()[0]
-                self.db.execute('UPDATE orders SET state=? WHERE id=?', ('출고 완료' if totals == shipped else '부분 출고',line['order_id']))
             self.event('물류 결과 반영', f'신규 {added}, 중복 {duplicates}, 스마트스토어 제외 {smartstore_skipped}')
         return added, duplicates
 

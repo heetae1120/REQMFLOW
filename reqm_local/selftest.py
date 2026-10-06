@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 import tkinter as tk
-from .files import reference_data_path, workbook_bytes, RESULT_COLUMNS
+from .files import reference_data_path, workbook_bytes
 from .service import Operations
 from .desktop import Desktop
 
@@ -21,14 +21,11 @@ def run(folder):
         headers=['주문번호','상품주문번호','상품명','옵션정보','수량','최종 상품별 총 주문금액','수취인명','수취인연락처1','우편번호','통합배송지','배송비 합계']
         order=folder/'demo-orders.xlsx'
         order.write_bytes(workbook_bytes(headers,[['DEMO-ORDER','DEMO-LINE','데모 상품','데모 옵션',3,10001,'가상 수령인','01000000000','00123','실제 배송 금지 테스트 주소',3000]]))
-        service.import_files([order],channel_override='리큐엠_스마트스토어')
+        service.import_files([order],channel_override='오늘의집')
         row=service.orders()[0]
         service.set_mapping(row['id'],[dict(code='DEMO-ERP',logistics_code='DEMO-WMS',name='테스트 상품',quantity=1,unit_amount=0,warehouse='300',customer='DEMO-CUSTOMER')])
         service.request([row['id']],'2026-10-01',folder/'demo-request.xlsx')
-        line=service.db.execute('SELECT id FROM request_lines').fetchone()[0]
-        result=folder/'demo-result.xlsx'
-        result.write_bytes(workbook_bytes(RESULT_COLUMNS,[[line,3,'DEMO-TRACK','2026-10-01']]))
-        service.import_results(result)
+        assert service.auto_import_shipments('2026-10-01') == (1,0)
         service.export_erp('2026-10-01','2026-10-01',folder/'demo-erp.xlsx')
         root=tk.Tk();root.withdraw();app=Desktop(root,service);root.update_idletasks()
         assert root.title().startswith('REQM FLOW')

@@ -13,6 +13,8 @@ python reqm_local_app.py
 
 패키징은 `pyinstaller --noconfirm REQM_local.spec`입니다. 완성된 `dist/REQM_FLOW` 폴더 전체를 복사해서 사용합니다.
 
+실제 출고 · ERP의 `1 출고건 확인`에서는 출고일을 지정한 뒤 `당일 출고건 자동 불러오기`를 누르면 그 날짜에 생성한 출고요청 중 스마트스토어를 제외한 미반영 행이 실제 출고로 등록됩니다. 위킵이 돌려준 파일을 직접 넣는 방식도 계속 사용할 수 있습니다. 이 파일은 주문 · 출고요청에서 생성한 위킵 양식과 같고, `일련번호`는 그대로 유지한 채 `송장번호`를 채워서 입력합니다.
+
 다른 Windows PC에 한 파일로 전달할 때는 `python tools/build_portable.py`로 만든 `dist/REQM_FLOW_Portable.exe`를 사용합니다. 별도 `_internal` 폴더는 필요하지 않으며, 각 PC의 운영 데이터는 `%LOCALAPPDATA%/REQM-Local`에 따로 저장됩니다.
 
 ## 첫 사용
