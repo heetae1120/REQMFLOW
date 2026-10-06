@@ -9,11 +9,13 @@ import tempfile
 import time
 import uuid
 import re
+import csv
 from collections import Counter
 from difflib import SequenceMatcher
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
+from openpyxl import load_workbook
 
 from ecount_sales_core import ReferenceCatalog, SmartStoreOrder, convert_orders, normalize_source
 from .files import (
@@ -131,6 +133,10 @@ class Operations:
         CREATE TABLE IF NOT EXISTS fees(bundle TEXT PRIMARY KEY, erp_id TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY, kind TEXT NOT NULL, day TEXT NOT NULL,
             content BLOB NOT NULL, registered INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS source_files(name TEXT PRIMARY KEY, extension TEXT NOT NULL,
+            content BLOB NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS artifact_notes(artifact_id TEXT NOT NULL, row_key TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT '', PRIMARY KEY(artifact_id,row_key));
         CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, at TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL);
         ''')
         event_columns = {row['name'] for row in self.db.execute('PRAGMA table_info(event_rules)')}
@@ -436,6 +442,12 @@ class Operations:
             incoming.extend(parse_orders(path, profiles, channel_override=channel_override))
         inserted = duplicates = 0
         with self.db:
+            for path in paths:
+                source=Path(path)
+                self.db.execute(
+                    'INSERT OR REPLACE INTO source_files(name,extension,content,updated_at) VALUES(?,?,?,?)',
+                    (source.name,source.suffix.lower(),source.read_bytes(),datetime.now().isoformat(timespec='seconds')),
+                )
             for data in incoming:
                 seed = f"{data['source_file']}|{data['source_row']}|{data.get('product','')}"
                 token = hashlib.sha256(seed.encode('utf-8')).hexdigest()[:12].upper()
@@ -470,6 +482,78 @@ class Operations:
                 inserted += 1
             self.event('주문 가져오기', f'신규 {inserted}, 중복 {duplicates}')
         return inserted, duplicates
+
+    @staticmethod
+    def _tracking_text(values):
+        return ', '.join(dict.fromkeys(identifier(value) for value in values if identifier(value)))
+
+    def _update_source_workbook(self, name, content, orders):
+        extension=Path(name).suffix.lower()
+        if extension in ('.xlsx','.xlsm'):
+            book=load_workbook(io.BytesIO(content),keep_vba=extension=='.xlsm')
+            sheet=max(book.worksheets,key=lambda value:value.max_row*value.max_column)
+            header_row=min(int(order['data'].get('source_header_row') or 1) for order in orders)
+            aliases={'송장번호','운송장번호','택배사송장번호'}
+            tracking_column=next((cell.column for cell in sheet[header_row] if identifier(cell.value).replace(' ','') in aliases),None)
+            if tracking_column is None:
+                tracking_column=sheet.max_column+1
+                source_header=sheet.cell(header_row,max(1,tracking_column-1))
+                target_header=sheet.cell(header_row,tracking_column,'송장번호')
+                if source_header.has_style:
+                    from copy import copy
+                    target_header._style=copy(source_header._style)
+                    target_header.font=copy(source_header.font);target_header.fill=copy(source_header.fill)
+                    target_header.border=copy(source_header.border);target_header.alignment=copy(source_header.alignment)
+                    target_header.number_format=source_header.number_format
+            for order in orders:
+                target=sheet.cell(int(order['data']['source_row']),tracking_column)
+                target.value=order['tracking'];target.data_type='s'
+            output=io.BytesIO();book.save(output);book.close()
+            return output.getvalue()
+        if extension=='.csv':
+            text=None
+            for encoding in ('utf-8-sig','cp949','utf-8'):
+                try:text=content.decode(encoding);break
+                except UnicodeDecodeError:continue
+            if text is None:raise ValueError(f'{name}: 문자 인코딩을 확인하세요.')
+            rows=list(csv.reader(io.StringIO(text)))
+            header_row=min(int(order['data'].get('source_header_row') or 1) for order in orders)-1
+            aliases={'송장번호','운송장번호','택배사송장번호'}
+            tracking_column=next((index for index,value in enumerate(rows[header_row]) if identifier(value).replace(' ','') in aliases),None)
+            if tracking_column is None:
+                tracking_column=len(rows[header_row]);rows[header_row].append('송장번호')
+            for order in orders:
+                row_index=int(order['data']['source_row'])-1
+                while len(rows[row_index])<=tracking_column:rows[row_index].append('')
+                rows[row_index][tracking_column]=order['tracking']
+            output=io.StringIO(newline='');csv.writer(output,lineterminator='\r\n').writerows(rows)
+            return output.getvalue().encode('utf-8-sig')
+        return content
+
+    def _sync_source_tracking(self, order_ids):
+        grouped={}
+        for order_id in set(order_ids):
+            row=self.db.execute('SELECT data FROM orders WHERE id=?',(order_id,)).fetchone()
+            if not row:continue
+            data=json.loads(row['data'])
+            tracking=self._tracking_text(value[0] for value in self.db.execute('''SELECT s.tracking FROM shipments s
+                JOIN request_lines r ON s.line_id=r.id WHERE r.order_id=? ORDER BY s.rowid''',(order_id,)))
+            data['tracking']=tracking
+            self.db.execute('UPDATE orders SET data=? WHERE id=?',(encode(data),order_id))
+            if data.get('source_file') and tracking:
+                grouped.setdefault(data['source_file'],[]).append({'data':data,'tracking':tracking})
+        for name,orders in grouped.items():
+            source=self.db.execute('SELECT content FROM source_files WHERE name=?',(name,)).fetchone()
+            if not source:continue
+            content=self._update_source_workbook(name,source['content'],orders)
+            self.db.execute('UPDATE source_files SET content=?,updated_at=? WHERE name=?',(
+                content,datetime.now().isoformat(timespec='seconds'),name,
+            ))
+
+    def export_source_file(self, name, path):
+        row=self.db.execute('SELECT content FROM source_files WHERE name=?',(name,)).fetchone()
+        if not row:raise ValueError('워크스페이스에 저장된 판매처 주문 파일을 찾지 못했습니다.')
+        Path(path).write_bytes(row['content'])
 
     def match_statistics(self, orders=None):
         orders=list(orders if orders is not None else self.orders())
@@ -827,7 +911,7 @@ class Operations:
             if not line:
                 raise ValueError(f'알 수 없는 일련번호: {serial}')
             return line, value('수량'), value('송장번호')
-        order_no, product = value('주문번호'), value('상품명')
+        order_no, recipient, product = value('주문번호'), value('수령자'), value('상품명')
         candidates = []
         for line in self.db.execute('''SELECT r.* FROM request_lines r
             JOIN requests q ON q.id=r.request_id JOIN orders o ON o.id=r.order_id
@@ -835,8 +919,16 @@ class Operations:
             order = self.db.execute('SELECT data,components FROM orders WHERE id=?', (line['order_id'],)).fetchone()
             data, components = json.loads(order['data']), json.loads(order['components'])
             component = components[line['component']]
-            if data.get('order_no') == order_no and identifier(component.get('name')) == product:
+            same_order=identifier(data.get('order_no'))==order_no
+            same_recipient=identifier(data.get('recipient')).replace(' ','')==recipient.replace(' ','')
+            if same_order and same_recipient:
                 candidates.append(line)
+        product_matches=[]
+        for line in candidates:
+            order=self.db.execute('SELECT components FROM orders WHERE id=?',(line['order_id'],)).fetchone()
+            component=json.loads(order['components'])[line['component']]
+            if product and identifier(component.get('name'))==product:product_matches.append(line)
+        if product_matches:candidates=product_matches
         requested=quantity(value('수량'))
         available=[]
         for line in candidates:
@@ -844,7 +936,7 @@ class Operations:
             if line['qty']-shipped >= requested:
                 available.append(line)
         if not available:
-            raise ValueError(f'{order_no} / {product}: 출고요청 행을 찾을 수 없거나 이미 전량 반영됐습니다.')
+            raise ValueError(f'{order_no} / {recipient}: 출고요청 행을 찾을 수 없거나 이미 전량 반영됐습니다.')
         return available[0], value('수량'), value('송장번호')
 
     def import_results(self, path, on=None):
@@ -856,6 +948,7 @@ class Operations:
         if not legacy_format and not wekeep_format:
             raise ValueError('물류 결과 헤더가 맞지 않습니다. 결과 양식 또는 설정을 확인하세요.')
         added = duplicates = smartstore_skipped = 0
+        affected_orders=[]
         with self.db:
             for row in rows[1:]:
                 if not any(x not in (None, '') for x in row):
@@ -883,6 +976,8 @@ class Operations:
                     duplicates += 1
                     continue
                 added += 1
+                affected_orders.append(line['order_id'])
+            self._sync_source_tracking(affected_orders)
             self.event('물류 결과 반영', f'신규 {added}, 중복 {duplicates}, 스마트스토어 제외 {smartstore_skipped}')
         return added, duplicates
 
@@ -1420,7 +1515,10 @@ class Operations:
         orders={row['id']:row for row in self.orders()}
         result=[]
 
-        def add(artifact,source,source_day,data,qty,amount,row_id):
+        def add(artifact,source,source_day,data,qty,amount,row_id,tracking='',warehouse=''):
+            note=self.db.execute('SELECT note FROM artifact_notes WHERE artifact_id=? AND row_key=?',(
+                artifact['id'],str(row_id),
+            )).fetchone()
             result.append({
                 'row_id':f"{artifact['id']}:{source}:{row_id}",
                 'artifact_id':artifact['id'],'artifact_day':artifact['day'],
@@ -1429,6 +1527,9 @@ class Operations:
                 'recipient':data.get('recipient',''),'phone':data.get('phone',''),
                 'product':data.get('product',''),'option':data.get('option',''),
                 'quantity':str(qty or ''),'amount':str(amount or '0'),
+                'tracking':tracking or data.get('tracking',''),'warehouse':warehouse,
+                'note':note['note'] if note else '','note_key':str(row_id),
+                'source_file':data.get('source_file',''),
                 'registered':bool(artifact['registered']),
             })
 
@@ -1442,7 +1543,11 @@ class Operations:
                     if not order:continue
                     components=order['components'];index=line['component']
                     component=components[index] if 0<=index<len(components) else {}
-                    add(artifact,'출고요청',artifact['day'],order['data'],line['qty'],component.get('amount','0'),line['id'])
+                    tracking=self._tracking_text(value[0] for value in self.db.execute(
+                        'SELECT tracking FROM shipments WHERE line_id=? ORDER BY rowid',(line['id'],)
+                    ))
+                    add(artifact,'출고요청',artifact['day'],order['data'],line['qty'],component.get('amount','0'),
+                        line['id'],tracking,warehouse_code(component.get('warehouse','')))
                 continue
             shipments=self.db.execute('''SELECT s.*,r.order_id,r.component FROM shipments s
                 JOIN request_lines r ON s.line_id=r.id WHERE s.erp_id=? ORDER BY s.day,s.rowid''',
@@ -1450,12 +1555,26 @@ class Operations:
             for shipment in shipments:
                 order=orders.get(shipment['order_id'])
                 if order:
-                    add(artifact,'일반 ERP',shipment['day'],order['data'],shipment['qty'],shipment['erp_amount'],shipment['id'])
+                    component=order['components'][shipment['component']]
+                    add(artifact,'일반 ERP',shipment['day'],order['data'],shipment['qty'],shipment['erp_amount'],
+                        shipment['id'],shipment['tracking'],warehouse_code(component.get('warehouse','')))
             for table,source in (('smartstore_erp_rows','스마트스토어 ERP'),('esm_erp_rows','ESM ERP')):
                 for row in self.db.execute(f'SELECT * FROM {table} WHERE erp_id=? ORDER BY day,rowid',(artifact['id'],)).fetchall():
                     data=json.loads(row['data'])
-                    add(artifact,source,row['day'],data,data.get('quantity',''),data.get('amount','0'),row['id'])
+                    components=json.loads(row['components'])
+                    warehouses=self._tracking_text(warehouse_code(component.get('warehouse','')) for component in components)
+                    add(artifact,source,row['day'],data,data.get('quantity',''),data.get('amount','0'),row['id'],
+                        data.get('tracking',''),warehouses)
         return result
+
+    def set_artifact_note(self, artifact_id, row_key, note):
+        with self.db:
+            if not self.db.execute('SELECT 1 FROM artifacts WHERE id=?',(artifact_id,)).fetchone():
+                raise ValueError('출력 이력을 찾지 못했습니다.')
+            self.db.execute('INSERT OR REPLACE INTO artifact_notes(artifact_id,row_key,note) VALUES(?,?,?)',(
+                artifact_id,str(row_key),identifier(note),
+            ))
+            self.event('출력 이력 비고 수정',f'{artifact_id}:{row_key}')
 
     def reexport(self, artifact_id, path):
         row = self.db.execute('SELECT content FROM artifacts WHERE id=?',(artifact_id,)).fetchone()

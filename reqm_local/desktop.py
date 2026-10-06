@@ -36,7 +36,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.7'
+APP_VERSION = '1.9.8'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -410,13 +410,16 @@ class Desktop:
         self.button(history_filters,'전체 이력',self.show_all_history,style='Quiet.TButton')
         line = ttk.Frame(history_frame); line.pack(fill='x',pady=8)
         self.button(line,'선택 파일 재저장',self.reexport)
+        self.button(line,'송장 반영 주문파일 저장',self.export_tracked_order_file,style='Quiet.TButton')
+        self.button(line,'비고 수정',self.edit_history_note,style='Quiet.TButton')
         self.button(line,'ERP 등록 확인',self.registered)
         ttk.Label(line,text='생성 파일의 주문 상세를 출력일별로 조회합니다.').pack(side='left',padx=20)
         self.history = self.tree(
             history_frame,
-            ['출력일(요일)','출고일','종류','판매처','주문번호','수령인','연락처','판매품목','옵션','수량','금액','등록','묶음 ID'],
-            [120,105,120,130,160,100,125,260,190,65,100,90,190],
+            ['출력일(요일)','출고일','종류','판매처','주문번호','수령인','연락처','판매품목','옵션','수량','금액','송장번호','출하창고','비고','등록','묶음 ID'],
+            [120,105,120,130,160,100,125,260,190,65,100,150,90,220,90,190],
         )
+        self.history.bind('<Double-1>',lambda _event:self.safe(self.edit_history_note))
         ttk.Label(settings_frame,text='로그인 전에는 이 PC에 저장되고, API 로그인 후에는 공유 DB와 동기화됩니다.',font=(self.font_family,16,'bold')).pack(anchor='w',pady=10)
         ttk.Label(settings_frame,text=str(service.folder),wraplength=1100).pack(anchor='w')
         ttk.Label(settings_frame,text='설정 파일에서 판매처별 헤더·계정·파일명 단서와 출력 열 이름을 변경할 수 있습니다.\n주문에 포함된 배송비는 원본의 배송비 합계를 사용합니다. 실제 거래처 규칙을 확인하세요.\nAPI 로그인 후 주문·매칭·출고·ERP 이력은 Supabase 공유 작업공간으로 동기화됩니다.\n동시에 같은 자료를 수정하면 버전 충돌로 저장을 중단하고 최신 자료를 다시 불러옵니다.',wraplength=1100).pack(anchor='w',pady=16)
@@ -1271,18 +1274,21 @@ class Desktop:
         self.history.delete(*self.history.get_children())
         selected_day=None if self.history_show_all else self.history_day.get()
         self.history_artifacts={}
+        self.history_rows={}
         weekdays=('월','화','수','목','금','토','일')
         for row in self.service.artifact_history_rows(selected_day):
             try:day_label=f"{row['artifact_day']} ({weekdays[date.fromisoformat(row['artifact_day']).weekday()]})"
             except ValueError:day_label=row['artifact_day']
             iid=row['row_id']
             self.history_artifacts[iid]=row['artifact_id']
+            self.history_rows[iid]=row
             channel=INTERNAL_TO_CHANNEL.get(row['channel'],row['channel']).removeprefix('리큐엠_')
             try:amount=f"{int(Decimal(row['amount'])):,}"
             except Exception:amount=row['amount']
             self.history.insert('', 'end',iid=iid,values=[
                 day_label,row['source_day'],row['source'],channel,row['order_no'],row['recipient'],row['phone'],
-                row['product'],row['option'],row['quantity'],amount,'확인 완료' if row['registered'] else '—',row['artifact_id'],
+                row['product'],row['option'],row['quantity'],amount,row['tracking'] or '—',row['warehouse'] or '—',
+                row['note'] or '', '확인 완료' if row['registered'] else '—',row['artifact_id'],
             ])
         self.root.after_idle(lambda:autosize_tree(self.history,maximum=360))
 
@@ -2027,6 +2033,31 @@ class Desktop:
     def reexport(self):
         row_id=self.selected(self.history)[0];key=self.history_artifacts[row_id];path=self.save_path(key+'.xlsx')
         if path:self.service.reexport(key,path)
+
+    def export_tracked_order_file(self):
+        row_id=self.selected(self.history)[0];row=self.history_rows[row_id]
+        source=row.get('source_file','')
+        if not source:raise ValueError('선택한 이력에 연결된 판매처 주문 파일이 없습니다.')
+        original=Path(source)
+        path=filedialog.asksaveasfilename(
+            parent=self.root,title='송장번호가 반영된 판매처 주문 파일 저장',
+            initialfile=f'{original.stem}_송장반영{original.suffix}',defaultextension=original.suffix,
+            filetypes=[('원본 형식',f'*{original.suffix}'),('모든 파일','*.*')],
+        )
+        if path:
+            self.service.export_source_file(source,path)
+            messagebox.showinfo('주문 파일 저장','송장번호가 반영된 판매처 주문 파일을 저장했습니다.',parent=self.root)
+
+    def edit_history_note(self):
+        row_id=self.selected(self.history)[0];row=self.history_rows[row_id]
+        note=simpledialog.askstring(
+            '출력 이력 비고',
+            f"주문번호: {row['order_no']}\n수령인: {row['recipient']}\n\n비고를 입력하세요.",
+            initialvalue=row.get('note',''),parent=self.root,
+        )
+        if note is None:return
+        self.service.set_artifact_note(row['artifact_id'],row['note_key'],note)
+        self.refresh_history()
 
     def registered(self):
         row_id=self.selected(self.history)[0];key=self.history_artifacts[row_id]

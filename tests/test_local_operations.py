@@ -446,6 +446,37 @@ class LocalTests(unittest.TestCase):
         shipment=self.s.db.execute('SELECT line_id,tracking,day FROM shipments').fetchone()
         self.assertEqual((shipment['line_id'],shipment['tracking'],shipment['day']),(line,'TRACK-WEKEEP','2026-10-02'))
 
+    def test_invoice_matches_order_and_recipient_then_updates_original_order_file(self):
+        source,order=self.import_order()
+        self.map(order,[dict(code='ITEM',logistics_code='W-ITEM',name='매칭품목',quantity=3,
+                             unit_amount=0,warehouse='300 위킵창고',customer='C')])
+        request=self.folder/'invoice-result.xlsx'
+        batch=self.s.request([order['id']],'2026-10-06',request)
+        book=load_workbook(request)
+        sheet=book['택배출고']
+        sheet['C2']='물류사에서 변경한 상품명'
+        sheet['J2']='TRACK-ORDER-RECIPIENT'
+        book.save(request);book.close()
+
+        self.assertEqual(self.s.import_results(request,'2026-10-06'),(1,0))
+        updated=self.folder/'updated-order.xlsx'
+        self.s.export_source_file(source.name,updated)
+        book=load_workbook(updated,data_only=True)
+        sheet=book.active
+        headers=[cell.value for cell in sheet[1]]
+        tracking_column=headers.index('송장번호')+1
+        self.assertEqual(sheet.cell(2,tracking_column).value,'TRACK-ORDER-RECIPIENT')
+        book.close()
+
+        history=[row for row in self.s.artifact_history_rows() if row['artifact_id']==batch]
+        self.assertEqual(len(history),1)
+        self.assertEqual(history[0]['tracking'],'TRACK-ORDER-RECIPIENT')
+        self.assertEqual(history[0]['warehouse'],'300')
+        self.assertEqual(history[0]['source_file'],source.name)
+        self.s.set_artifact_note(batch,history[0]['note_key'],'주소 재확인 완료')
+        refreshed=[row for row in self.s.artifact_history_rows() if row['artifact_id']==batch]
+        self.assertEqual(refreshed[0]['note'],'주소 재확인 완료')
+
     def test_mapping_fields_have_fixed_requested_order(self):
         self.assertEqual([FIELD_LABELS[field] for field in MAPPING_FIELD_ORDER], [
             '주문일자', '판매처주문번호', '상품주문번호', '상품명', '옵션', '수량', '금액', '배송비',

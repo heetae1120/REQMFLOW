@@ -580,6 +580,7 @@ def parse_orders(path, profiles, channel_override=None):
                 entry['postcode'] = postcode_match.group(1)
                 entry['address'] = entry['address'][postcode_match.end():].strip()
         entry.update(channel=channel_override or profile['channel'], account=profile.get('account', '기본'), source_file=Path(path).name, source_row=rowno)
+        entry['source_header_row'] = start + 1
         entry['format_name']=profile.get('name') or profile['channel']
         entry['format_match_summary']=summary
         entry['column_matches']={field:{**match,'header':headers[match['index']]} for field,match in resolved.items()}
