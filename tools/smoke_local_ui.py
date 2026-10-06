@@ -42,16 +42,25 @@ with tempfile.TemporaryDirectory(dir=root/'outputs') as folder:
             22:'옵션정보',26:'수량',27:'상품주문액 (원)',32:'총 배송비 (원)',35:'수령인명',
             36:'수령인 연락처',37:'배송지 주소',38:'우편번호',40:'배송 메시지',44:'채널분류',
         }.items():zigzag_headers[index]=label
+        zigzag_profile=app.matching_profile('지그재그')
+        zigzag_profile.setdefault('columns',{})['address2']=['이전 파일 상세주소']
+        zigzag_profile.setdefault('column_indexes',{})['address2']=5
         app.matching_sites.selection_clear(0,'end')
         app.matching_sites.selection_set(MATCHING_CHANNELS.index('지그재그'))
         app.load_matching_profile()
-        app.sample_rows=[tuple(zigzag_headers),tuple(['']*47)]
-        app.matching_header_row.set('1')
+        app.sample_rows=[tuple(['지그재그 주문 보고서']+['']*46),tuple(zigzag_headers),tuple(['']*47)]
+        app.matching_header_box.configure(values=[
+            '1 · 지그재그 주문 보고서','2 · 상품주문번호 | 주문번호 | 결제일',
+        ])
+        app.matching_header_row.set('2 · 상품주문번호 | 주문번호 | 결제일')
         app.apply_sample_headers(force_auto=True)
         assert len(app.mapping_choice_values)==17
+        assert all('이전 파일 상세주소' not in choice for choice in app.mapping_choice_values)
         assert app.mapping_vars['order_no'].get()=='C · 주문번호'
         assert app.mapping_vars['product'].get()=='S · 상품명'
         assert app.mapping_vars['memo'].get()=='AO · 배송 메시지'
+        assert app.mapping_vars['address2'].get()=='미사용'
+        assert app.matching_analysis.get().startswith('2행 기준')
         box=app.mapping_boxes['order_no']
         event=type('Event',(),{'keysym':'Hangul'})()
         for query in ('주','주문','주문번','주문번호'):

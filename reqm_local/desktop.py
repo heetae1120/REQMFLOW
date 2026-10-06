@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -32,7 +33,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.0'
+APP_VERSION = '1.9.1'
 
 
 CHANNEL_TO_INTERNAL = {
@@ -783,7 +784,11 @@ class Desktop:
         ttk.Label(identity,text='헤더 행').grid(row=3,column=0,sticky='w',padx=(0,12),pady=(10,5))
         header_controls = ttk.Frame(identity)
         header_controls.grid(row=3,column=1,sticky='w',pady=(10,5))
-        ttk.Entry(header_controls,textvariable=self.matching_header_row,width=7).pack(side='left')
+        self.matching_header_box=ttk.Combobox(
+            header_controls,textvariable=self.matching_header_row,values=['1'],width=34,state='normal',
+        )
+        self.matching_header_box.pack(side='left')
+        bind_wide_combobox(self.matching_header_box)
         ttk.Button(header_controls,text='행 적용',command=lambda:self.safe(self.apply_sample_headers)).pack(side='left',padx=6)
         ttk.Button(identity,text='파일 추가 · 1차 자동 매칭',style='Accent.TButton',command=lambda:self.safe(self.load_matching_sample)).grid(row=3,column=2,sticky='w',padx=8,pady=(10,5))
         ttk.Label(identity,textvariable=self.matching_sample,foreground='#64748B').grid(row=3,column=3,sticky='w',pady=(10,5))
@@ -894,6 +899,8 @@ class Desktop:
             self.mapping_boxes[field].configure(values=related_column_choices(field,field_choices))
         self.sample_headers = []
         self.sample_rows = None
+        self.matching_header_row.set('1')
+        self.matching_header_box.configure(values=['1'])
         self.mapping_choice_values = list(choices)
         self.matching_sample.set('예시 파일을 선택하지 않았습니다.')
         if profile and not profile.get('enabled',True):
@@ -939,7 +946,14 @@ class Desktop:
             scored.append((score, sum(bool(value) for value in headers), -index, index))
         best = max(scored)[3]
         self.sample_rows = rows
-        self.matching_header_row.set(str(best+1))
+        header_rows=[]
+        for index,row in enumerate(rows[:30]):
+            cells=[identifier(value) for value in row if identifier(value)]
+            preview=' | '.join(value[:28] for value in cells[:6]) or '(빈 행)'
+            if len(preview)>110:preview=preview[:107]+'…'
+            header_rows.append(f'{index+1} · {preview}')
+        self.matching_header_box.configure(values=header_rows)
+        self.matching_header_row.set(header_rows[best])
         self.matching_sample.set(Path(path).name)
         if not self.matching_filename.get().strip():
             self.matching_filename.set(Path(path).name)
@@ -949,45 +963,46 @@ class Desktop:
         if self.sample_rows is None:
             return
         try:
-            row_index = int(self.matching_header_row.get())-1
+            match=re.match(r'^\s*(\d+)',self.matching_header_row.get())
+            if not match:raise ValueError
+            row_index = int(match.group(1))-1
             row = self.sample_rows[row_index]
         except (ValueError, IndexError):
             raise ValueError('헤더 행 번호를 올바르게 입력하세요.') from None
         profile = self.matching_profile(self.selected_matching_channel()) or {}
         preset = self.matching_preset(self.selected_matching_channel())
-        self.sample_headers = sample_header_names(self.sample_rows, row_index, profile, preset)
+        # Once a sample is loaded, the selected row is the sole source of the
+        # visible columns. Saved indexes belong to the previous file and can
+        # silently point at unrelated columns in a changed/new marketplace
+        # format. The explicitly selected row also prevents report titles in
+        # rows above it from being mistaken for selectable Excel columns.
+        self.sample_headers = sample_header_names(self.sample_rows, row_index, include_previous=False)
         choices = ['미사용']+[column_choice(index, header) for index,header in enumerate(self.sample_headers) if header]
         self.mapping_choice_values = choices
-        configured = profile.get('columns',{})
         aliases = {}
-        configured_indexes = {}
         for field in MAPPING_FIELD_ORDER:
-            values, saved_index = self.matching_field_config(profile, preset, field)
+            values, _saved_index = self.matching_field_config(profile, preset, field)
             aliases[field] = list(dict.fromkeys([*values, *ORDER_COLUMNS[field]]))
-            configured_indexes[field] = saved_index
         matched=match_columns(self.sample_headers,aliases)
         automatic = analyze_order_columns(self.sample_headers, self.sample_rows[row_index+1:row_index+21],aliases)
         for field, box in self.mapping_boxes.items():
             box.configure(values=related_column_choices(field,choices))
-            selected_index = None
-            if force_auto and field in automatic:
-                selected_index = automatic[field]
-            elif isinstance(configured_indexes.get(field), int):
-                selected_index = configured_indexes[field]
-            else:
-                field_aliases = aliases[field]
-                selected_index = next((index for index,name in enumerate(self.sample_headers) if name in field_aliases),None)
+            selected_index = automatic.get(field)
             if isinstance(selected_index, int) and 0 <= selected_index < len(self.sample_headers):
                 self.mapping_vars[field].set(column_choice(selected_index, self.sample_headers[selected_index]))
                 method=matched.get(field,{}).get('method')
-                self.mapping_status_vars[field].set(method or ('내용추정' if field in automatic else '저장값'))
+                self.mapping_status_vars[field].set(method or '내용추정')
             else:
                 self.mapping_vars[field].set('미사용')
                 self.mapping_status_vars[field].set('미사용')
-        suggested_count = sum(field in automatic for field in SUGGESTED_MAPPING_FIELDS)
         exact=sum(m['method']=='일치' for m in matched.values())
         near=sum(m['method']=='근사' for m in matched.values())
-        self.matching_analysis.set(f'1순위 일치 {exact}개 · 2순위 근사 {near}개 · 샘플 추정 {len(automatic)-len(matched)}개. 저장하면 주문 입력에 적용됩니다.')
+        visible_columns=sum(bool(header) for header in self.sample_headers)
+        self.matching_analysis.set(
+            f'{row_index+1}행 기준 · 실제 열 {visible_columns}개 · 1순위 일치 {exact}개 · '
+            f'2순위 근사 {near}개 · 샘플 추정 {max(0,len(automatic)-len(matched))}개. '
+            '미매칭 항목도 실제 열 목록에서 직접 선택할 수 있습니다.'
+        )
 
     def save_matching_profile(self):
         channel = self.selected_matching_channel()

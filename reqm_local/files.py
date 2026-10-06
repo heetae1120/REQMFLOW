@@ -109,7 +109,7 @@ def profile_column_choices(profile, fallback=None):
     return ['미사용'] + [column_choice(index, labels[index]) for index in sorted(labels)]
 
 
-def sample_header_names(rows, row_index, profile=None, fallback=None):
+def sample_header_names(rows, row_index, profile=None, fallback=None, include_previous=True):
     """Resolve a sample's header labels, including sparse/multi-row headers."""
     row = rows[row_index]
     nearby = rows[max(0, row_index - 2):row_index + 1]
@@ -120,16 +120,17 @@ def sample_header_names(rows, row_index, profile=None, fallback=None):
     # Spreadsheet exports sometimes use merged or two-line headers.  Only
     # borrow from rows above the selected header so order values never become
     # menu labels.
-    for index, header in enumerate(headers):
-        if header:
-            continue
-        parts = []
-        for candidate_row in nearby[:-1]:
-            candidate = identifier(candidate_row[index]) if index < len(candidate_row) else ''
-            if candidate and candidate not in parts:
-                parts.append(candidate)
-        if parts:
-            headers[index] = ' / '.join(parts)
+    if include_previous:
+        for index, header in enumerate(headers):
+            if header:
+                continue
+            parts = []
+            for candidate_row in nearby[:-1]:
+                candidate = identifier(candidate_row[index]) if index < len(candidate_row) else ''
+                if candidate and candidate not in parts:
+                    parts.append(candidate)
+            if parts:
+                headers[index] = ' / '.join(parts)
 
     for index, header in profile_header_names(profile, fallback).items():
         if index >= len(headers):
