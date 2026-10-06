@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from decimal import Decimal, InvalidOperation
+import tkinter as tk
 import tkinter.font as tkfont
 
 
@@ -51,55 +53,149 @@ def filter_combobox_choices(query: str, values) -> list[str]:
     return [value for value in values if all(term in str(value).casefold() for term in terms)]
 
 
-def widen_combobox_dropdown(widget, values=None, maximum: int = 72) -> None:
-    """Size the native ttk popdown for long code/name values."""
+def combobox_text_width(values, minimum: int = 0, maximum: int = 56) -> int:
+    """Return a Tk character width that also accounts for wide Korean glyphs."""
+    def units(value):
+        return sum(2 if unicodedata.east_asian_width(character) in ('W','F') else 1
+                   for character in str(value))
+    longest=max((units(value) for value in values),default=0)
+    return max(minimum,min(maximum,longest+5))
+
+
+def widen_combobox_dropdown(widget, values=None, maximum: int = 96) -> None:
+    """Size both the editable field and native popdown for long code/name values."""
     values = list(values if values is not None else widget.cget('values'))
-    longest = max((len(str(value)) for value in values), default=0)
-    width = max(int(widget.cget('width') or 0), min(maximum, longest + 3))
+    current=max(1,int(widget.cget('width') or 0))
+    field_width=combobox_text_width(values,current,44)
+    dropdown_width=combobox_text_width(values,field_width,maximum)
+    try:
+        if field_width > current:
+            widget.configure(width=field_width)
+    except Exception:
+        pass
     try:
         popdown = widget.tk.call('ttk::combobox::PopdownWindow', str(widget))
-        widget.tk.call(f'{popdown}.f.l', 'configure', '-width', width, '-height', min(12, max(1, len(values))))
+        widget.tk.call(f'{popdown}.f.l', 'configure', '-width', dropdown_width, '-height', min(12, max(1, len(values))))
     except Exception:
         pass
 
 
 def bind_wide_combobox(widget) -> None:
-    """Also widen a combobox when its arrow is opened manually."""
-    widget.bind('<ButtonPress-1>', lambda _event:widen_combobox_dropdown(widget), add='+')
-
-
-def post_combobox(widget, values, delay: int = 380) -> None:
-    """Update choices now, then open once after typing pauses.
-
-    Re-posting a ttk combobox on every KeyRelease interrupts Korean IME
-    composition.  A short debounce preserves composition while keeping the
-    automatic suggestion list.
-    """
-    widget.configure(values=values)
-    pending = getattr(widget, '_reqm_post_job', None)
-    if pending:
-        try:
-            widget.after_cancel(pending)
-        except Exception:
-            pass
-        widget._reqm_post_job = None
-    if not values:
+    """Attach one persistent, non-modal suggestion list to an editable combobox."""
+    if getattr(widget,'_reqm_search_bound',False):
         return
+    widget._reqm_search_bound=True
 
-    def open_choices():
-        widget._reqm_post_job = None
-        if not widget.winfo_exists() or widget.focus_get() != widget:
-            return
-        try:
-            popdown = widget.tk.call('ttk::combobox::PopdownWindow', str(widget))
-            if not int(widget.tk.call('winfo', 'ismapped', popdown)):
-                widget.tk.call('ttk::combobox::Post', str(widget))
-            widen_combobox_dropdown(widget, values)
-        except Exception:
-            widget.event_generate('<Down>')
+    def show_current(*_):
+        post_combobox(widget,widget.cget('values'))
 
-    if widget.focus_get() == widget:
-        widget._reqm_post_job = widget.after(delay, open_choices)
+    def button_press(event):
+        widen_combobox_dropdown(widget)
+        element=widget.identify(event.x,event.y)
+        if 'arrow' in str(element).casefold():
+            widget.focus_force()
+            widget.after_idle(show_current)
+            return 'break'
+
+    def move(delta):
+        popup=getattr(widget,'_reqm_popup',None)
+        if not popup or not popup.winfo_viewable():
+            show_current();return 'break'
+        values=getattr(widget,'_reqm_popup_values',[])
+        if not values:return 'break'
+        listbox=widget._reqm_popup_list
+        selected=listbox.curselection()
+        index=max(0,min(len(values)-1,(selected[0] if selected else (-1 if delta>0 else 0))+delta))
+        listbox.selection_clear(0,'end');listbox.selection_set(index);listbox.activate(index);listbox.see(index)
+        return 'break'
+
+    def choose_active(_event=None):
+        popup=getattr(widget,'_reqm_popup',None)
+        if not popup or not popup.winfo_viewable():return
+        selected=widget._reqm_popup_list.curselection()
+        if not selected:return
+        value=widget._reqm_popup_list.get(selected[0])
+        widget.set(value);widget.icursor('end')
+        popup.withdraw();widget.focus_force()
+        widget.event_generate('<<ComboboxSelected>>')
+        return 'break'
+
+    def hide_later(*_):
+        def hide():
+            popup=getattr(widget,'_reqm_popup',None)
+            if not popup or not popup.winfo_exists():return
+            focus=str(widget.tk.call('focus'))
+            if focus == str(widget) or focus.startswith(str(popup)):
+                return
+            popup.withdraw()
+        widget.after(120,hide)
+
+    widget.bind('<ButtonPress-1>',button_press,add='+')
+    widget.bind('<FocusIn>',show_current,add='+')
+    widget.bind('<FocusOut>',hide_later,add='+')
+    widget.bind('<Down>',lambda _event:move(1),add='+')
+    widget.bind('<Up>',lambda _event:move(-1),add='+')
+    widget.bind('<Return>',choose_active,add='+')
+    widget.bind('<Escape>',lambda _event:_hide_combobox_popup(widget),add='+')
+    widget.bind('<Alt-Down>',lambda _event:(show_current(),'break')[1],add='+')
+
+
+def post_combobox(widget, values, delay: int = 0) -> None:
+    """Update and show related choices without moving focus from the text field."""
+    values=list(values)
+    widget.configure(values=values)
+    widen_combobox_dropdown(widget,values)
+    if not values:
+        _hide_combobox_popup(widget)
+        return
+    try:focused=str(widget.tk.call('focus')) == str(widget)
+    except Exception:focused=False
+    if not focused:return
+    popup=getattr(widget,'_reqm_popup',None)
+    if not popup or not popup.winfo_exists():
+        popup=tk.Toplevel(widget.winfo_toplevel())
+        popup.withdraw();popup.overrideredirect(True);popup.transient(widget.winfo_toplevel())
+        frame=tk.Frame(popup,bg='#CBD5E1',padx=1,pady=1);frame.pack(fill='both',expand=True)
+        listbox=tk.Listbox(
+            frame,exportselection=False,activestyle='dotbox',relief='flat',borderwidth=0,
+            bg='#FFFFFF',fg='#172033',selectbackground='#2563EB',selectforeground='#FFFFFF',
+            font=tkfont.nametofont('TkDefaultFont'),highlightthickness=0,
+        )
+        scrollbar=tk.Scrollbar(frame,orient='vertical',command=listbox.yview)
+        listbox.configure(yscrollcommand=scrollbar.set)
+        listbox.pack(side='left',fill='both',expand=True);scrollbar.pack(side='right',fill='y')
+        widget._reqm_popup=popup;widget._reqm_popup_list=listbox
+        def choose(event):
+            index=listbox.nearest(event.y)
+            if index < 0:return
+            value=listbox.get(index)
+            widget.set(value);widget.icursor('end')
+            popup.withdraw();widget.focus_force()
+            widget.event_generate('<<ComboboxSelected>>')
+        listbox.bind('<ButtonRelease-1>',choose)
+        listbox.bind('<Return>',lambda _event:choose(type('Event',(),{'y':listbox.bbox('active')[1] if listbox.bbox('active') else 0})()))
+        widget.bind('<Destroy>',lambda _event:popup.destroy() if popup.winfo_exists() else None,add='+')
+    listbox=widget._reqm_popup_list
+    listbox.delete(0,'end')
+    for value in values:listbox.insert('end',value)
+    widget._reqm_popup_values=values
+    font=tkfont.nametofont('TkDefaultFont')
+    width=max(widget.winfo_width(),min(960,max((font.measure(str(value)) for value in values),default=0)+48))
+    rows=min(12,max(1,len(values)));height=rows*(font.metrics('linespace')+7)+4
+    x=widget.winfo_rootx();y=widget.winfo_rooty()+widget.winfo_height()
+    screen_width=widget.winfo_screenwidth();screen_height=widget.winfo_screenheight()
+    x=max(0,min(x,screen_width-width-8))
+    if y+height>screen_height-8:y=max(0,widget.winfo_rooty()-height)
+    popup.geometry(f'{width}x{height}+{x}+{y}')
+    popup.deiconify();popup.lift()
+    try:popup.attributes('-topmost',True)
+    except tk.TclError:pass
+
+
+def _hide_combobox_popup(widget):
+    popup=getattr(widget,'_reqm_popup',None)
+    if popup and popup.winfo_exists():popup.withdraw()
+    return 'break'
 
 
 def autosize_tree(tree, *, minimum: int = 58, maximum: int = 420) -> None:

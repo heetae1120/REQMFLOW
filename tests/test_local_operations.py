@@ -16,7 +16,9 @@ from reqm_local.files import (
 )
 from reqm_local.service import Operations
 from reqm_local.shipping import ShippingCatalog, compact
-from reqm_local.ui_helpers import filter_combobox_choices, search_suggestions, tree_sort_value
+from reqm_local.ui_helpers import (
+    combobox_text_width, filter_combobox_choices, search_suggestions, tree_sort_value,
+)
 from reqm_local.workspace_cloud import export_workspace, import_workspace, workspace_digest
 from reqm_local.updater import RELEASE_API, prepare_update, version_tuple
 from reqm_local.desktop import (
@@ -83,6 +85,10 @@ class LocalTests(unittest.TestCase):
     def test_combobox_search_matches_every_typed_term(self):
         choices=['QS-QST01M_BK · 미니셀카봉 블랙','QS-QST01M_WH · 미니셀카봉 화이트','OTHER · 충전기']
         self.assertEqual(filter_combobox_choices('qst 화이트',choices),[choices[1]])
+
+    def test_combobox_width_accounts_for_long_korean_choices(self):
+        self.assertGreater(combobox_text_width(['QP1000C 실리콘케이스 핸디형 클라우드']),34)
+        self.assertEqual(combobox_text_width(['X'*200],maximum=56),56)
 
     def test_customer_code_is_remembered_for_the_same_channel(self):
         _,order=self.import_order()

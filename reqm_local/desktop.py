@@ -36,7 +36,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.6'
+APP_VERSION = '1.9.7'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -1454,8 +1454,10 @@ class Desktop:
         grid=ttk.Frame(win,padding=12);grid.pack(fill='both',expand=True)
         fields=['code','logistics_code','name','quantity','warehouse','customer']
         labels=['ERP 품목코드','물류사 품목코드','품목명','구성 수량(곱셈 안 함)','출하창고','거래처코드']
-        widths=[34,34,34,10,14,34]
+        widths=[40,40,40,12,16,40]
         for column,label in enumerate(labels):ttk.Label(grid,text=label).grid(row=0,column=column,padx=3,pady=6)
+        for column in (0,1,2,5):grid.columnconfigure(column,weight=2)
+        for column in (3,4):grid.columnconfigure(column,weight=1)
         entries=[]
         customer=self.service.channel_customer_code(d['channel'])
         customer_choices=self.service.customer_choices()
@@ -1516,7 +1518,7 @@ class Desktop:
                     widget.bind('<Double-1>',self.select_all_text)
                     bind_wide_combobox(widget)
                 else:widget=ttk.Entry(grid,textvariable=variables[field],width=widths[column])
-                widget.grid(row=len(entries)+1,column=column,padx=3,pady=4);widgets.append(widget)
+                widget.grid(row=len(entries)+1,column=column,padx=3,pady=4,sticky='ew');widgets.append(widget)
             entries.append((variables,widgets))
         from decimal import Decimal
         for c in o['components']:
@@ -1598,8 +1600,10 @@ class Desktop:
         frame.rowconfigure(9,weight=1)
         fields=['code','logistics_code','name','quantity','unit_amount','warehouse','customer']
         labels=['ERP 품목코드','물류사 품목코드','품목명','구성 수량(곱셈 안 함)','부속품 단가','창고','거래처코드']
-        widths=[34,34,34,10,14,10,34]
+        widths=[38,38,38,12,15,12,38]
         for column,label in enumerate(labels):ttk.Label(component_box,text=label).grid(row=0,column=column,padx=3,pady=5)
+        for column in (0,1,2,6):component_box.columnconfigure(column,weight=2)
+        for column in (3,4,5):component_box.columnconfigure(column,weight=1)
         catalog_choices=[]
         for code,item in sorted(self.service.catalog.items.items()):
             name=item.get('representative_name') or item.get('item_name') or ''
@@ -1634,7 +1638,7 @@ class Desktop:
                     widget.bind('<<ComboboxSelected>>',chosen);widget.bind('<KeyRelease>',search);widget.bind('<Double-1>',self.select_all_text);bind_wide_combobox(widget)
                 else:
                     widget=ttk.Entry(component_box,textvariable=variables[field],width=widths[column]);widget.bind('<Double-1>',self.select_all_text)
-                widget.grid(row=len(entries)+1,column=column,padx=3,pady=3);widgets.append(widget)
+                widget.grid(row=len(entries)+1,column=column,padx=3,pady=3,sticky='ew');widgets.append(widget)
             entries.append((variables,widgets))
         definitions=data.get('event_components',[])
         if not definitions and order['components']:
