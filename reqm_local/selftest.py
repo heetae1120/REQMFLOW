@@ -46,6 +46,10 @@ def run(folder):
         assert tuple(app.table['columns']) == (
             '판매처','주문번호','이름','주소','연락처','상품명','매칭품목','출하창고','진행상태','작업구분',
         )
+        assert tuple(app.history['columns']) == (
+            '출력일(요일)','출고일','종류','판매처','주문번호','수령인','연락처','판매품목','옵션','매칭품목',
+            '수량','금액','송장번호','출하창고','비고','등록','묶음 ID',
+        )
         assert len(app.item_name_tree.get_children()) == 184
         assert len(app.table.get_children())==1
         app.table.selection_set(row['id']);app.show_detail()

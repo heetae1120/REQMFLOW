@@ -199,6 +199,9 @@ def _hide_combobox_popup(widget):
 
 
 def autosize_tree(tree, *, minimum: int = 58, maximum: int = 420) -> None:
+    apply_sort=getattr(tree,'_reqm_apply_sort',None)
+    if apply_sort:
+        apply_sort()
     font = tkfont.nametofont("TkDefaultFont")
     heading_font = tkfont.nametofont("TkHeadingFont")
     for column in tree["columns"]:
@@ -226,20 +229,27 @@ def bind_tree_sorting(tree) -> None:
     labels = {column: str(tree.heading(column, "text") or column) for column in tree["columns"]}
     state = {"column": "", "descending": False}
 
-    def sort(column):
-        descending = not state["descending"] if state["column"] == column else False
+    def apply():
+        column=state['column']
+        if not column:return
         rows = list(tree.get_children(""))
-        rows.sort(key=lambda item: tree_sort_value(tree.set(item, column)), reverse=descending)
+        rows.sort(key=lambda item: tree_sort_value(tree.set(item, column)), reverse=state['descending'])
         for index, item in enumerate(rows):
             tree.move(item, "", index)
-        state.update(column=column, descending=descending)
         for name, label in labels.items():
-            suffix = " ▼" if name == column and descending else (" ▲" if name == column else "")
+            suffix = " ▼" if name == column and state['descending'] else (" ▲" if name == column else "")
             tree.heading(name, text=label + suffix)
+
+    def sort(column):
+        descending = not state["descending"] if state["column"] == column else False
+        state.update(column=column, descending=descending)
+        apply()
 
     for column in tree["columns"]:
         tree.heading(column, command=lambda selected=column: sort(selected))
     tree._reqm_sort = sort
+    tree._reqm_apply_sort = apply
+    tree._reqm_sort_state = state
 
 
 def bind_desktop_drag(tree) -> None:

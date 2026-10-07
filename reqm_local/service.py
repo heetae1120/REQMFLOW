@@ -886,8 +886,6 @@ class Operations:
         rows=self.db.execute(f'SELECT * FROM orders WHERE id IN ({marks})',ids).fetchall()
         if len(rows) != len(ids):
             raise ValueError('선택한 주문을 다시 확인하세요.')
-        if any(row['state'] not in ('검토 필요','출고 준비') for row in rows):
-            raise ValueError('출고요청 전 주문만 출하창고를 변경할 수 있습니다.')
         with self.db:
             for row in rows:
                 components=json.loads(row['components'])
@@ -899,6 +897,9 @@ class Operations:
                 self.db.execute('UPDATE orders SET data=?,components=? WHERE id=?',(
                     encode(data),encode(components),row['id'],
                 ))
+                self.db.execute('''UPDATE shipments SET erp_warehouse=? WHERE line_id IN (
+                    SELECT id FROM request_lines WHERE order_id=?
+                )''',(code,row['id']))
             self.event('주문 출하창고 변경',f'{len(rows)}건 / {code}')
 
     @staticmethod
@@ -1803,7 +1804,7 @@ class Operations:
         orders={row['id']:row for row in self.orders()}
         result=[]
 
-        def add(artifact,source,source_day,data,qty,amount,row_id,tracking='',warehouse=''):
+        def add(artifact,source,source_day,data,qty,amount,row_id,tracking='',warehouse='',matching_item=''):
             note=self.db.execute('SELECT note FROM artifact_notes WHERE artifact_id=? AND row_key=?',(
                 artifact['id'],str(row_id),
             )).fetchone()
@@ -1814,6 +1815,7 @@ class Operations:
                 'channel':data.get('channel',''),'order_no':data.get('order_no',''),
                 'recipient':data.get('recipient',''),'phone':data.get('phone',''),
                 'product':data.get('product',''),'option':data.get('option',''),
+                'matching_item':matching_item,
                 'quantity':str(qty or ''),'amount':str(amount or '0'),
                 'tracking':tracking or data.get('tracking',''),'warehouse':warehouse,
                 'note':note['note'] if note else '','note_key':str(row_id),
@@ -1835,7 +1837,8 @@ class Operations:
                         'SELECT tracking FROM shipments WHERE line_id=? ORDER BY rowid',(line['id'],)
                     ))
                     add(artifact,'출고요청',artifact['day'],order['data'],line['qty'],component.get('amount','0'),
-                        line['id'],tracking,warehouse_code(component.get('warehouse','')))
+                        line['id'],tracking,warehouse_code(component.get('warehouse','')),
+                        self.item_name(component.get('code'),component.get('name')))
                 continue
             shipments=self.db.execute('''SELECT s.*,r.order_id,r.component FROM shipments s
                 JOIN request_lines r ON s.line_id=r.id WHERE s.erp_id=? ORDER BY s.day,s.rowid''',
@@ -1845,14 +1848,18 @@ class Operations:
                 if order:
                     component=self._shipment_component(shipment,order)
                     add(artifact,'일반 ERP',shipment['day'],order['data'],shipment['qty'],shipment['erp_amount'],
-                        shipment['id'],shipment['tracking'],warehouse_code(component.get('warehouse','')))
+                        shipment['id'],shipment['tracking'],warehouse_code(component.get('warehouse','')),
+                        self.item_name(component.get('code'),component.get('name')))
             for table,source in (('smartstore_erp_rows','스마트스토어 ERP'),('esm_erp_rows','ESM ERP')):
                 for row in self.db.execute(f'SELECT * FROM {table} WHERE erp_id=? ORDER BY day,rowid',(artifact['id'],)).fetchall():
                     data=json.loads(row['data'])
                     components=json.loads(row['components'])
                     warehouses=self._tracking_text(warehouse_code(component.get('warehouse','')) for component in components)
+                    matching_items=self._tracking_text(
+                        self.item_name(component.get('code'),component.get('name')) for component in components
+                    )
                     add(artifact,source,row['day'],data,data.get('quantity',''),data.get('amount','0'),row['id'],
-                        data.get('tracking',''),warehouses)
+                        data.get('tracking',''),warehouses,matching_items)
         return result
 
     def set_artifact_note(self, artifact_id, row_key, note):

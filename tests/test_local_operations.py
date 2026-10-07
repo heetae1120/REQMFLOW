@@ -554,10 +554,30 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(len(history),1)
         self.assertEqual(history[0]['tracking'],'TRACK-ORDER-RECIPIENT')
         self.assertEqual(history[0]['warehouse'],'300')
+        self.assertEqual(history[0]['matching_item'],'매칭품목')
         self.assertEqual(history[0]['source_file'],source.name)
         self.s.set_artifact_note(batch,history[0]['note_key'],'주소 재확인 완료')
         refreshed=[row for row in self.s.artifact_history_rows() if row['artifact_id']==batch]
         self.assertEqual(refreshed[0]['note'],'주소 재확인 완료')
+
+    def test_completed_order_warehouse_change_updates_request_and_erp_history(self):
+        _,order=self.import_order(q=1,amount=10000,fee=0)
+        self.map(order,[dict(
+            code='QWC-Q3100S-BK',logistics_code='QWC-Q3100S-BK',name='이전 이름',quantity=1,
+            unit_amount=0,warehouse='300',customer='C',
+        )])
+        request_id=self.s.request([order['id']],'2026-10-07',self.folder/'warehouse-history-request.xlsx')
+        line=self.s.db.execute('SELECT id FROM request_lines WHERE order_id=?',(order['id'],)).fetchone()[0]
+        self.result(line,1,on='2026-10-07')
+        erp_id=self.s.export_erp('2026-10-07','2026-10-07',self.folder/'warehouse-history-erp.xlsx')
+        self.assertEqual(self.s.orders()[0]['state'],'출고 완료')
+        self.s.set_order_warehouse([order['id']],'100 본사창고')
+        history=self.s.artifact_history_rows()
+        request_row=next(row for row in history if row['artifact_id']==request_id)
+        erp_row=next(row for row in history if row['artifact_id']==erp_id and row['source']=='일반 ERP')
+        self.assertEqual((request_row['warehouse'],erp_row['warehouse']),('100','100'))
+        self.assertEqual(request_row['matching_item'],'Q3100S 그레이')
+        self.assertEqual(erp_row['matching_item'],'Q3100S 그레이')
 
     def test_existing_workspace_can_attach_an_old_order_file_before_tracking_export(self):
         source,order=self.import_order();line=self.request(order)

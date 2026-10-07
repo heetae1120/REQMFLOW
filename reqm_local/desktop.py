@@ -37,7 +37,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.13'
+APP_VERSION = '1.9.14'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -420,14 +420,19 @@ class Desktop:
         ttk.Checkbutton(line,text='ESM 포함',variable=self.erp_include_esm).pack(side='left',padx=(14,4))
         ttk.Button(line,textvariable=self.erp_exclusion_text,command=lambda:self.safe(lambda:self.choose_channel_exclusions('erp'))).pack(side='left',padx=4)
         self.button(line,'ERP 파일 생성',self.erp,style='Accent.TButton')
+        self.button(line,'기존 ERP 파일 다시 다운로드',self.download_erp_again,style='Quiet.TButton')
         ttk.Label(erp_card,text='이미 생성한 출고는 제외됩니다. 배송비는 묶음 전체 출고 완료 후 한 번 반영하며, 부가세 포함·10% 과세 기준입니다.',foreground='#64748B',wraplength=1000).pack(anchor='w',pady=(16,0))
         self.history_day=tk.StringVar(value=date.today().isoformat())
         self.history_show_all=True
         history_filters=ttk.Frame(history_frame);history_filters.pack(fill='x',pady=(0,8))
+        self.history_search=tk.StringVar()
         ttk.Label(history_filters,text='출력일').pack(side='left',padx=(0,5))
         self.date_picker(history_filters,self.history_day,'출력 이력 날짜').pack(side='left')
         self.button(history_filters,'선택일 조회',self.show_history_day,style='Accent.TButton')
         self.button(history_filters,'전체 이력',self.show_all_history,style='Quiet.TButton')
+        ttk.Label(history_filters,text='검색').pack(side='left',padx=(14,5))
+        ttk.Entry(history_filters,textvariable=self.history_search,width=34).pack(side='left')
+        self.history_search.trace_add('write',lambda *_:self.refresh_history())
         line = ttk.Frame(history_frame); line.pack(fill='x',pady=8)
         self.button(line,'선택 파일 재저장',self.reexport)
         self.button(line,'송장 반영 주문파일 저장',self.export_tracked_order_file,style='Quiet.TButton')
@@ -436,8 +441,8 @@ class Desktop:
         ttk.Label(line,text='생성 파일의 주문 상세를 출력일별로 조회합니다.').pack(side='left',padx=20)
         self.history = self.tree(
             history_frame,
-            ['출력일(요일)','출고일','종류','판매처','주문번호','수령인','연락처','판매품목','옵션','수량','금액','송장번호','출하창고','비고','등록','묶음 ID'],
-            [120,105,120,130,160,100,125,260,190,65,100,150,90,220,90,190],
+            ['출력일(요일)','출고일','종류','판매처','주문번호','수령인','연락처','판매품목','옵션','매칭품목','수량','금액','송장번호','출하창고','비고','등록','묶음 ID'],
+            [120,105,120,130,160,100,125,260,190,260,65,100,150,90,220,90,190],
         )
         self.history.bind('<Double-1>',lambda _event:self.safe(self.edit_history_note))
         ttk.Label(settings_frame,text='로그인 전에는 이 PC에 저장되고, API 로그인 후에는 공유 DB와 동기화됩니다.',font=(self.font_family,16,'bold')).pack(anchor='w',pady=10)
@@ -1336,11 +1341,15 @@ class Desktop:
             channel=INTERNAL_TO_CHANNEL.get(row['channel'],row['channel']).removeprefix('리큐엠_')
             try:amount=f"{int(Decimal(row['amount'])):,}"
             except Exception:amount=row['amount']
-            self.history.insert('', 'end',iid=iid,values=[
+            values=[
                 day_label,row['source_day'],row['source'],channel,row['order_no'],row['recipient'],row['phone'],
-                row['product'],row['option'],row['quantity'],amount,row['tracking'] or '—',row['warehouse'] or '—',
+                row['product'],row['option'],row.get('matching_item',''),row['quantity'],amount,row['tracking'] or '—',row['warehouse'] or '—',
                 row['note'] or '', '확인 완료' if row['registered'] else '—',row['artifact_id'],
-            ])
+            ]
+            terms=[term for term in self.history_search.get().casefold().split() if term]
+            haystack=' '.join(str(value) for value in values).casefold()
+            if not all(term in haystack for term in terms):continue
+            self.history.insert('', 'end',iid=iid,values=values)
         self.root.after_idle(lambda:autosize_tree(self.history,maximum=360))
 
     def show_history_day(self):
@@ -2206,6 +2215,28 @@ class Desktop:
                 excluded_channels=self.erp_excluded_channels,
             );self.refresh()
             messagebox.showinfo('ERP 파일 생성','ERP 파일을 저장했습니다. 사이트 등록 후 출력 이력에서 등록 확인을 표시하세요.')
+
+    def download_erp_again(self):
+        artifacts=[row for row in self.service.artifacts() if row['kind'] in ('ERP','ESM ERP')]
+        if not artifacts:raise ValueError('다시 다운로드할 ERP 파일 이력이 없습니다.')
+        win=tk.Toplevel(self.root);win.title('기존 ERP 파일 다시 다운로드');win.geometry('720x480');win.transient(self.root);win.grab_set()
+        ttk.Label(win,text='기존 ERP 파일 다시 다운로드',font=(self.font_family,17,'bold'),padding=(18,16)).pack(anchor='w')
+        ttk.Label(win,text='생성 당시의 ERP Excel 원본을 그대로 다시 저장합니다.',foreground='#64748B',padding=(18,0)).pack(anchor='w')
+        tree=self.tree(win,['출력일','종류','파일 ID','등록 확인'],[120,120,260,100])
+        rows={}
+        for index,row in enumerate(artifacts):
+            item_id=f'erp-artifact-{index}';rows[item_id]=row
+            tree.insert('', 'end',iid=item_id,values=[row['day'],row['kind'],row['id'],'확인 완료' if row['registered'] else '—'])
+        def save():
+            selected=tree.selection()
+            if not selected:raise ValueError('다시 다운로드할 ERP 파일을 선택하세요.')
+            row=rows[selected[0]];path=self.save_path(f"{row['kind']}_{row['day']}_{row['id']}.xlsx")
+            if path:
+                self.service.reexport(row['id'],path);win.destroy()
+                messagebox.showinfo('ERP 파일 저장','기존 ERP 파일을 다시 저장했습니다.',parent=self.root)
+        actions=ttk.Frame(win,padding=14);actions.pack(fill='x')
+        self.button(actions,'선택 파일 다운로드',save,style='Accent.TButton')
+        self.button(actions,'닫기',win.destroy,style='Quiet.TButton')
 
     def reexport(self):
         row_id=self.selected(self.history)[0];key=self.history_artifacts[row_id];path=self.save_path(key+'.xlsx')
