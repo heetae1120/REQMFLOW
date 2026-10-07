@@ -435,8 +435,9 @@ class Operations:
             component['match_method'] = '판매전표 DB 변환 규칙'
         return self._attach_wekeep_skus(data, list(grouped.values()))
 
-    def import_files(self, paths, channel_override=None):
+    def import_files(self, paths, channel_override=None, registered_on=None):
         incoming = []
+        registered_on=day(registered_on or date.today().isoformat())
         profiles = [profile for profile in self.settings['profiles'] if profile.get('purpose','order') == 'order']
         for path in paths:
             incoming.extend(parse_orders(path, profiles, channel_override=channel_override))
@@ -449,6 +450,7 @@ class Operations:
                     (source.name,source.suffix.lower(),source.read_bytes(),datetime.now().isoformat(timespec='seconds')),
                 )
             for data in incoming:
+                data['_registered_day']=registered_on
                 seed = f"{data['source_file']}|{data['source_row']}|{data.get('product','')}"
                 token = hashlib.sha256(seed.encode('utf-8')).hexdigest()[:12].upper()
                 data['order_no'] = data.get('order_no') or f'AUTO-ORDER-{token}'
@@ -667,9 +669,22 @@ class Operations:
     def orders(self):
         orders = [{**dict(row), 'data':json.loads(row['data']), 'components':json.loads(row['components'])}
                   for row in self.db.execute('SELECT * FROM orders ORDER BY rowid DESC')]
+        request_days: dict[str,set[str]] = {}
+        shipment_days: dict[str,set[str]] = {}
+        for row in self.db.execute('''SELECT r.order_id,q.day FROM request_lines r
+            JOIN requests q ON q.id=r.request_id'''):
+            request_days.setdefault(row['order_id'],set()).add(row['day'])
+        for row in self.db.execute('''SELECT r.order_id,s.day FROM shipments s
+            JOIN request_lines r ON r.id=s.line_id'''):
+            shipment_days.setdefault(row['order_id'],set()).add(row['day'])
         counts = Counter(self.duplicate_key(order['data']) for order in orders)
         for order in orders:
             order['duplicate_count'] = counts[self.duplicate_key(order['data'])]
+            registered=order['data'].get('_registered_day','')
+            order['registered_day']=registered
+            order['request_days']=sorted(request_days.get(order['id'],set()))
+            order['shipment_days']=sorted(shipment_days.get(order['id'],set()))
+            order['activity_days']=sorted(set(filter(None,[registered,*order['request_days'],*order['shipment_days']])))
         return sorted(orders, key=lambda order:order['duplicate_count'] <= 1)
 
     def event_rules(self):

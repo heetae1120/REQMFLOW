@@ -29,4 +29,4 @@ python tools/build_portable.py
 
 `config.example.json`을 `config.json`으로 복사한 뒤 필요한 Supabase 공개 설정값을 입력합니다. 실제 비밀번호와 비밀키는 커밋하지 않습니다.
 
-Windows 배포본은 이 저장소의 GitHub Releases를 확인해 새 버전을 자동으로 내려받습니다.
+Windows 배포본은 Supabase Storage의 `reqm-updates` 저장소를 확인해 SHA-256 검증된 새 `REQM_FLOW.exe`만 자동으로 교체합니다. 최초 구성과 게시 방법은 `LOCAL_PROGRAM.md`의 업데이트 항목을 참고하세요.

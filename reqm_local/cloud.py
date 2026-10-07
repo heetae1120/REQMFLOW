@@ -9,6 +9,17 @@ from ecount_sales_core import ReferenceCatalog
 from .shipping import ShippingCatalog
 
 
+# These values are intentionally public client configuration. Supabase's
+# publishable key is safe to ship in desktop/web clients; authorization is
+# still enforced by Auth and database/storage policies.
+DEFAULT_CLOUD_CONFIG = {
+    "supabase_url": "https://jcslohuraqclhryeqxoc.supabase.co",
+    "supabase_publishable_key": "sb_publishable_dafbXHpLHVPDhsMwm_B5RA_LgCqlWeg",
+    "update_bucket": "reqm-updates",
+    "update_prefix": "desktop",
+}
+
+
 TABLE_SPECS = (
     ("ecount_item_reference", ("item_code",)),
     ("ecount_sales_channels", ("source_name",)),
@@ -38,10 +49,13 @@ def config_candidates() -> list[Path]:
 
 
 def load_cloud_config() -> dict[str, str]:
+    config = dict(DEFAULT_CLOUD_CONFIG)
     for path in config_candidates():
         if path.exists():
-            return json.loads(path.read_text(encoding="utf-8-sig"))
-    return {}
+            configured = json.loads(path.read_text(encoding="utf-8-sig"))
+            config.update({key: value for key, value in configured.items() if value not in (None, "")})
+            break
+    return config
 
 
 def _fetch_all(client, table_name: str) -> list[dict]:

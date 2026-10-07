@@ -11,7 +11,8 @@ import ctypes
 import calendar
 import tkinter.font as tkfont
 from difflib import SequenceMatcher
-from datetime import date, timedelta
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox, simpledialog
 
@@ -36,7 +37,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.9'
+APP_VERSION = '1.9.10'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -195,7 +196,9 @@ class Desktop:
         tk.Label(content,textvariable=self.summary,bg='#FFFFFF',fg='#475569',font=(f,10,'bold'),padx=16,pady=10,anchor='w',highlightbackground='#E2E8F0',highlightthickness=1).pack(fill='x',pady=(0,12))
         tabs = ttk.Notebook(content,style='Flow.TNotebook')
         tabs.pack(fill='both',expand=True)
-        self.today = tk.StringVar(value=date.today().isoformat())
+        self.order_day = tk.StringVar(value=date.today().isoformat())
+        # Registration, request creation and review share one selected work day.
+        self.today = self.order_day
         self.request_excluded_channels=set(service.settings.get('request_excluded_channels',[]))
         self.erp_excluded_channels=set(service.settings.get('erp_excluded_channels',[]))
         self.request_exclusion_text=tk.StringVar(value=self.exclusion_label(self.request_excluded_channels))
@@ -223,6 +226,11 @@ class Desktop:
         self.build_matching_settings(matching_frame)
         channels = ttk.LabelFrame(self.order_frame,text='판매처 주문 파일',padding=(12,8))
         channels.pack(fill='x',pady=(0,10))
+        channel_day = ttk.Frame(channels)
+        channel_day.grid(row=0,column=0,columnspan=6,sticky='ew',padx=4,pady=(0,7))
+        ttk.Label(channel_day,text='작업일',font=(self.font_family,10,'bold')).pack(side='left')
+        self.date_picker(channel_day,self.order_day,'주문 등록·출고 조회일').pack(side='left',padx=6)
+        ttk.Label(channel_day,text='선택 날짜에 등록했거나 출고한 주문만 표시됩니다.',foreground='#64748B').pack(side='left',padx=10)
         self.channel_status = {}
         self.channel_visibility = {channel:True for channel in SALES_CHANNELS}
         self.channel_eye_text = {}
@@ -234,7 +242,7 @@ class Desktop:
             eye_text=tk.StringVar(value='👁')
             self.channel_eye_text[channel]=eye_text
             cell=ttk.Frame(channels)
-            cell.grid(row=index // 6,column=index % 6,sticky='ew',padx=4,pady=4)
+            cell.grid(row=1 + index // 6,column=index % 6,sticky='ew',padx=4,pady=4)
             button = ttk.Button(
                 cell, textvariable=status,
                 command=lambda selected=channel:self.safe(lambda:self.import_channel(selected)),
@@ -254,7 +262,7 @@ class Desktop:
             channels,
             text='판매처를 누르거나 아래 영역에 파일을 드래그하세요. ✓는 입력 완료, 눈 아이콘은 주문 목록 표시 여부입니다.',
             foreground='#64748B',
-        ).grid(row=(len(SALES_CHANNELS)+5)//6,column=0,columnspan=6,sticky='w',padx=4,pady=(7,2))
+        ).grid(row=1+(len(SALES_CHANNELS)+5)//6,column=0,columnspan=6,sticky='w',padx=4,pady=(7,2))
         self.drop_zone = tk.Label(
             self.order_frame,
             text='↓  주문 파일을 여기에 드래그하세요   ·   XLSX / XLS / CSV',
@@ -304,9 +312,10 @@ class Desktop:
         ttk.Label(self.order_frame,textvariable=self.detail,wraplength=1200,padding=(8,6),foreground='#64748B').pack(fill='x')
         self.table = self.tree(
             self.order_frame,
-            ['판매처','주문번호','이름','주소','연락처','상품명','매칭할 상품명'],
-            [125,155,110,330,135,300,320],
+            ['판매처','주문번호','이름','주소','연락처','상품명','매칭할 상품명','진행상태','작업구분'],
+            [125,155,110,330,135,300,320,95,120],
         )
+        self.order_day.trace_add('write',lambda *_:self.refresh_orders_for_day())
         self.table.tag_configure('review',foreground='#BE123C',background='#FFF1F2')
         self.table.tag_configure('duplicate',foreground='#854D0E',background='#FEF9C3')
         self.table.tag_configure('forced',foreground='#166534',background='#F0FDF4')
@@ -404,8 +413,6 @@ class Desktop:
         history_filters=ttk.Frame(history_frame);history_filters.pack(fill='x',pady=(0,8))
         ttk.Label(history_filters,text='출력일').pack(side='left',padx=(0,5))
         self.date_picker(history_filters,self.history_day,'출력 이력 날짜').pack(side='left')
-        self.button(history_filters,'이전날',lambda:self.move_history_day(-1),style='Quiet.TButton')
-        self.button(history_filters,'다음날',lambda:self.move_history_day(1),style='Quiet.TButton')
         self.button(history_filters,'선택일 조회',self.show_history_day,style='Accent.TButton')
         self.button(history_filters,'전체 이력',self.show_all_history,style='Quiet.TButton')
         line = ttk.Frame(history_frame); line.pack(fill='x',pady=8)
@@ -588,7 +595,7 @@ class Desktop:
                 self.check_remote_update(user_initiated=True)
                 return
             version=self.available_update['version']
-            if not messagebox.askyesno('업데이트',f'REQM FLOW {version}을 받아 현재 폴더에 적용할까요?\n저장된 주문과 설정은 그대로 유지됩니다.',parent=self.root):
+            if not messagebox.askyesno('업데이트',f'REQM FLOW {version} 실행파일만 교체할까요?\n저장된 주문·설정·내부 파일은 그대로 유지됩니다.',parent=self.root):
                 return
             self.update_text.set(f'{version} 다운로드 중…')
             threading.Thread(target=self._download_update_worker,daemon=True).start()
@@ -1208,12 +1215,17 @@ class Desktop:
     def refresh_orders(self):
         self.rows={o['id']:o for o in self.service.orders()}
         self.table.delete(*self.table.get_children())
+        try:selected_day=date.fromisoformat(self.order_day.get()).isoformat()
+        except ValueError:selected_day=''
         ordered=list(self.rows.items())
         if self.unmatched_first.get():
             ordered.sort(key=lambda item:item[1]['state']!='검토 필요')
         shown=0
         for key,o in ordered:
             d=o['data']
+            legacy_pending=not o.get('activity_days') and o['state'] in ('검토 필요','출고 준비')
+            if selected_day and selected_day not in o.get('activity_days',[]) and not legacy_pending:
+                continue
             channel = INTERNAL_TO_CHANNEL.get(d['channel'],d['channel'])
             if not self.channel_visibility.get(channel,True):
                 continue
@@ -1222,7 +1234,12 @@ class Desktop:
             duplicate = '강제 승인' if d.get('force_shipping_approved') else (f"중복 {o['duplicate_count']}건" if o['duplicate_count'] > 1 else '')
             source_product=d.get('source_product',d['product']);source_option=d.get('source_option',d['option'])
             converted=' / '.join(f"{c.get('name') or c.get('code')} [{c.get('logistics_code') or c.get('code')}]" for c in o['components'])
-            values=[channel,d['order_no'],d['recipient'],f"{d.get('postcode','')} {d['address']}".strip(),d['phone'],f"{source_product} / {source_option}",converted]
+            work_kind=[]
+            if selected_day == o.get('registered_day'):work_kind.append('등록')
+            if selected_day in o.get('request_days',[]):work_kind.append('출고요청')
+            if selected_day in o.get('shipment_days',[]):work_kind.append('실제출고')
+            if legacy_pending:work_kind.append('기존 미처리')
+            values=[channel,d['order_no'],d['recipient'],f"{d.get('postcode','')} {d['address']}".strip(),d['phone'],f"{source_product} / {source_option}",converted,o['state'],'·'.join(work_kind)]
             selected_filter = self.filter.get()
             if selected_filter == '중복 주문' and o['duplicate_count'] <= 1:
                 continue
@@ -1244,6 +1261,12 @@ class Desktop:
         unmatched=sum(order['state']=='검토 필요' for order in self.rows.values())
         self.order_counts.set(f'전체 {len(self.rows):,}건 · 미매칭 {unmatched:,}건 · 표시 {shown:,}건')
         self.root.after_idle(lambda:autosize_tree(self.table))
+
+    def refresh_orders_for_day(self):
+        try:date.fromisoformat(self.order_day.get())
+        except ValueError:return
+        self.refresh_orders()
+        self.refresh_channel_status()
 
     def toggle_channel_visibility(self, channel):
         visible=not self.channel_visibility.get(channel,True)
@@ -1291,11 +1314,6 @@ class Desktop:
                 row['note'] or '', '확인 완료' if row['registered'] else '—',row['artifact_id'],
             ])
         self.root.after_idle(lambda:autosize_tree(self.history,maximum=360))
-
-    def move_history_day(self, delta):
-        current=date.fromisoformat(self.history_day.get())
-        self.history_day.set((current+timedelta(days=delta)).isoformat())
-        self.history_show_all=False;self.refresh_history()
 
     def show_history_day(self):
         date.fromisoformat(self.history_day.get())
@@ -1406,7 +1424,9 @@ class Desktop:
         self.safe(lambda:self.import_paths(supported))
 
     def import_paths(self, paths, channel_override=None, title='판매 입력'):
-        new,duplicate=self.service.import_files(paths,channel_override=channel_override)
+        new,duplicate=self.service.import_files(
+            paths,channel_override=channel_override,registered_on=self.order_day.get(),
+        )
         source_names={Path(path).name for path in paths}
         imported=[order for order in self.service.orders() if order['data'].get('source_file') in source_names]
         history_duplicates=0
@@ -1424,12 +1444,13 @@ class Desktop:
 
     def refresh_channel_status(self):
         files = {channel:set() for channel in SALES_CHANNELS}
+        selected_day=self.order_day.get()
         event_channels = {rule['channel'] for rule in self.service.event_rules() if rule['active']}
         for order in self.rows.values():
             data = order['data']
             channel = INTERNAL_TO_CHANNEL.get(data.get('channel'), data.get('channel'))
             source = data.get('source_file')
-            if channel in files and source:
+            if channel in files and source and order.get('registered_day') == selected_day:
                 files[channel].add(source)
         for channel, status in self.channel_status.items():
             count = len(files[channel])
@@ -1438,7 +1459,7 @@ class Desktop:
             prefix = 'EVENT · ' if event else ('✓  ' if count else '□  ')
             suffix = f'  ({count}개)' if count else ''
             status.set(f'{prefix}{channel}{suffix}')
-            self.channel_buttons[channel].configure(style='Complete.Channel.TButton' if count or event else 'Channel.TButton')
+            self.channel_buttons[channel].configure(style='Complete.Channel.TButton' if count else 'Channel.TButton')
 
     def import_channel(self, channel):
         paths = self.order_files(f'{channel} 주문 파일 선택')

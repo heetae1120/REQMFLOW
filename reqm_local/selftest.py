@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 import tkinter as tk
 from .files import reference_data_path, workbook_bytes
+from .cloud import load_cloud_config
 from .service import Operations
 from .desktop import Desktop
 
@@ -15,6 +16,9 @@ def run(folder):
     assert callable(create_client)
     assert EdgeOptions
     assert pystray.Icon
+    cloud_config=load_cloud_config()
+    assert cloud_config.get('supabase_url') == 'https://jcslohuraqclhryeqxoc.supabase.co'
+    assert str(cloud_config.get('supabase_publishable_key','')).startswith('sb_publishable_')
     folder=Path(folder);folder.mkdir(parents=True,exist_ok=True)
     base=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parent.parent))
     service=Operations(folder/'test-data',reference_data_path(base))
@@ -39,7 +43,7 @@ def run(folder):
         app.table.selection_set(row['id']);app.show_detail()
         assert len(app.history.get_children())==2
         assert service.orders()[0]['state']=='출고 완료'
-        (folder/'self-test.json').write_text(json.dumps({'ok':True,'orders':1,'artifacts':2,'desktop':'OK','font':app.font_family},ensure_ascii=False),encoding='utf-8')
+        (folder/'self-test.json').write_text(json.dumps({'ok':True,'orders':1,'artifacts':2,'desktop':'OK','font':app.font_family,'cloud_config':'OK'},ensure_ascii=False),encoding='utf-8')
     except Exception as exc:
         (folder/'self-test.json').write_text(json.dumps({'ok':False,'error':str(exc)},ensure_ascii=False),encoding='utf-8')
         raise

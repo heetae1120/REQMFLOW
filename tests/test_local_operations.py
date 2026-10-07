@@ -20,7 +20,8 @@ from reqm_local.ui_helpers import (
     combobox_text_width, filter_combobox_choices, search_suggestions, tree_sort_value,
 )
 from reqm_local.workspace_cloud import export_workspace, import_workspace, workspace_digest
-from reqm_local.updater import RELEASE_API, prepare_update, version_tuple
+from reqm_local import cloud
+from reqm_local.updater import UPDATE_BUCKET, prepare_update, update_manifest_url, version_tuple
 from reqm_local.desktop import (
     COMPLETED_ORDER_STATES, FIELD_LABELS, MAPPING_FIELD_ORDER, calendar_month_days,
     matching_header_row_number,
@@ -161,17 +162,42 @@ class LocalTests(unittest.TestCase):
     def test_updater_compares_semantic_versions(self):
         self.assertGreater(version_tuple('v1.10.0'),version_tuple('1.9.9'))
         self.assertEqual(version_tuple('1.4'),(1,4,0))
-        self.assertEqual(RELEASE_API,'https://api.github.com/repos/heetae1120/REQMFLOW/releases/latest')
+        self.assertEqual(UPDATE_BUCKET,'reqm-updates')
+        self.assertEqual(
+            update_manifest_url({'supabase_url':'https://demo.supabase.co'}),
+            'https://demo.supabase.co/storage/v1/object/public/reqm-updates/desktop/latest.json',
+        )
+
+    def test_cloud_config_has_packaged_public_fallback(self):
+        original=cloud.config_candidates
+        try:
+            cloud.config_candidates=lambda: [self.folder/'missing-config.json']
+            config=cloud.load_cloud_config()
+        finally:
+            cloud.config_candidates=original
+        self.assertEqual(config['supabase_url'],'https://jcslohuraqclhryeqxoc.supabase.co')
+        self.assertTrue(config['supabase_publishable_key'].startswith('sb_publishable_'))
+        self.assertEqual(update_manifest_url(config),'https://jcslohuraqclhryeqxoc.supabase.co/storage/v1/object/public/reqm-updates/desktop/latest.json')
 
     def test_updater_verifies_and_extracts_release_package(self):
-        import hashlib,zipfile
-        package=self.folder/'update.zip'
-        with zipfile.ZipFile(package,'w') as archive:
-            archive.writestr('REQM_FLOW/REQM_FLOW.exe',b'demo executable')
-        checksum=self.folder/'update.sha256'
-        checksum.write_text(hashlib.sha256(package.read_bytes()).hexdigest()+'  REQM_FLOW_windows.zip',encoding='utf-8')
-        source=prepare_update({'package_url':package.as_uri(),'checksum_url':checksum.as_uri()})
+        import hashlib
+        executable=self.folder/'REQM_FLOW.exe';executable.write_bytes(b'demo executable')
+        source=prepare_update({'exe_url':executable.as_uri(),'sha256':hashlib.sha256(executable.read_bytes()).hexdigest()})
         self.assertEqual((source/'REQM_FLOW.exe').read_bytes(),b'demo executable')
+
+    def test_orders_are_grouped_by_registration_request_and_shipping_day(self):
+        path=self.folder/'dated.xlsx'
+        path.write_bytes(workbook_bytes(HEADERS,[['O1','DATED','테스트상품','기본',1,1000,'수령인','01000000000','00123','주소','B1',0,'결제완료','2026-10-01']]))
+        self.s.import_files([path],channel_override='오늘의집',registered_on='2026-10-05')
+        order=self.s.orders()[0];self.map(order)
+        self.s.request([order['id']],'2026-10-06',self.folder/'dated-request.xlsx')
+        line=self.s.db.execute('SELECT id FROM request_lines WHERE order_id=?',(order['id'],)).fetchone()[0]
+        self.result(line,1,on='2026-10-07')
+        dated=self.s.orders()[0]
+        self.assertEqual(dated['registered_day'],'2026-10-05')
+        self.assertEqual(dated['request_days'],['2026-10-06'])
+        self.assertEqual(dated['shipment_days'],['2026-10-07'])
+        self.assertEqual(dated['activity_days'],['2026-10-05','2026-10-06','2026-10-07'])
 
     def test_shared_workspace_snapshot_restores_orders_settings_and_binary_history(self):
         _,order=self.import_order();self.request(order)

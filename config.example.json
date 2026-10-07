@@ -1,4 +1,6 @@
 {
-  "supabase_url": "https://prbyoxzowkycjjqxpsft.supabase.co",
-  "supabase_publishable_key": "여기에 Supabase publishable 또는 anon 키 입력"
+  "supabase_url": "https://jcslohuraqclhryeqxoc.supabase.co",
+  "supabase_publishable_key": "sb_publishable_dafbXHpLHVPDhsMwm_B5RA_LgCqlWeg",
+  "update_bucket": "reqm-updates",
+  "update_prefix": "desktop"
 }
