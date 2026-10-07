@@ -41,8 +41,12 @@ def run(folder):
             '구분','출고일','판매처','주문번호','이름','ERP 품목코드','ERP 품목명','출하창고','수량','송장번호',
         )
         assert tuple(app.erp_shipments['columns']) == (
-            '실제 출고일','주문번호','이름','구성품 수','주문 금액','현재 구성품별 금액',
+            '실제 출고일','판매처','주문번호','이름','구성품 수','주문 금액','현재 구성품별 금액',
         )
+        assert tuple(app.table['columns']) == (
+            '판매처','주문번호','이름','주소','연락처','상품명','매칭품목','출하창고','진행상태','작업구분',
+        )
+        assert len(app.item_name_tree.get_children()) == 184
         assert len(app.table.get_children())==1
         app.table.selection_set(row['id']);app.show_detail()
         assert len(app.history.get_children())==2

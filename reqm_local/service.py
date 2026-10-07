@@ -110,6 +110,9 @@ class Operations:
         CREATE TABLE IF NOT EXISTS orders(id TEXT PRIMARY KEY, identity TEXT UNIQUE NOT NULL, data TEXT NOT NULL,
             components TEXT NOT NULL DEFAULT '[]', state TEXT NOT NULL, issue TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS mappings(key TEXT PRIMARY KEY, components TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS item_names(
+            erp_item_code TEXT PRIMARY KEY, matching_name TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS event_rules(id TEXT PRIMARY KEY, channel TEXT NOT NULL, name TEXT NOT NULL,
             source_product TEXT NOT NULL, source_option TEXT NOT NULL, target_product TEXT NOT NULL,
             target_option TEXT NOT NULL, target_amount TEXT NOT NULL, components TEXT NOT NULL DEFAULT '[]',
@@ -159,10 +162,62 @@ class Operations:
                 ).fetchone()[0]
                 if component_count > 1:
                     self.db.execute('UPDATE shipments SET amount_split_confirmed=0 WHERE id=?',(row['id'],))
+        self.seed_item_names()
         self.db.commit()
 
     def close(self):
         self.db.close()
+
+    def seed_item_names(self):
+        """Add packaged item names once without overwriting worker edits."""
+        path=self.reference_dir/'wekeep_item_names.csv'
+        if not path.exists():
+            return 0
+        inserted=0
+        with path.open(encoding='utf-8-sig',newline='') as handle:
+            for row in csv.DictReader(handle):
+                code=identifier(row.get('erp_item_code'))
+                name=identifier(row.get('matching_name'))
+                if not code or not name:
+                    continue
+                cursor=self.db.execute(
+                    'INSERT OR IGNORE INTO item_names(erp_item_code,matching_name) VALUES(?,?)',(code,name),
+                )
+                inserted+=cursor.rowcount
+        return inserted
+
+    def item_name(self, code, fallback=''):
+        code=identifier(code)
+        if code:
+            row=self.db.execute('SELECT matching_name FROM item_names WHERE erp_item_code=?',(code,)).fetchone()
+            if row:
+                return row['matching_name']
+            item=self.catalog.items.get(code,{})
+            fallback=identifier(fallback) or identifier(item.get('representative_name') or item.get('item_name'))
+        return identifier(fallback)
+
+    def item_name_rows(self):
+        return [dict(row) for row in self.db.execute(
+            'SELECT erp_item_code,matching_name FROM item_names ORDER BY matching_name,erp_item_code'
+        )]
+
+    def save_item_name(self, erp_item_code, matching_name, original_code=''):
+        code=identifier(erp_item_code);name=identifier(matching_name);original=identifier(original_code)
+        if not code or not name:
+            raise ValueError('ERP 품목코드와 매칭품목명을 모두 입력하세요.')
+        with self.db:
+            if original and original != code:
+                self.db.execute('DELETE FROM item_names WHERE erp_item_code=?',(original,))
+            self.db.execute(
+                'INSERT OR REPLACE INTO item_names(erp_item_code,matching_name) VALUES(?,?)',(code,name),
+            )
+            self.event('품목 기준 저장',f'{code}: {name}')
+
+    def item_choices(self):
+        choices={row['erp_item_code']:row['matching_name'] for row in self.item_name_rows()}
+        for code,item in self.catalog.items.items():
+            choices.setdefault(str(code),identifier(item.get('representative_name') or item.get('item_name')))
+        return [{'code':code,'name':name} for code,name in sorted(choices.items())]
 
     def event(self, action, detail):
         self.db.execute('INSERT INTO events(at,action,detail) VALUES(?,?,?)', (datetime.now().isoformat(timespec='seconds'), action, detail))
@@ -284,6 +339,7 @@ class Operations:
                         raise ValueError(f'{channel}의 ERP 거래처코드를 입력하세요. 한 번 저장하면 같은 판매처의 다음 매칭에 자동 적용됩니다.')
                     raise ValueError(f'구성품의 {labels[key]}를 입력하세요.')
             component['warehouse'] = warehouse_code(component['warehouse'])
+            component['name'] = self.item_name(component['code'],component['name'])
             component['quantity'] = quantity(source.get('quantity',''))
             component['unit_amount'] = str(number(source.get('unit_amount','0')))
             if number(component['unit_amount']) != number(component['unit_amount']).to_integral_value():
@@ -333,8 +389,10 @@ class Operations:
             aliases=shipping.aliases.get((channel_key(data.get('channel')),source),[]) or shipping.aliases.get(('',source),[])
             alias_codes={identifier(component.get('item_code')) for alias in aliases for component in _component_rows(alias.get('components'))}
         combined={}
+        for row in self.item_name_rows():
+            combined[row['erp_item_code']]={'code':row['erp_item_code'],'name':row['matching_name']}
         for code,item in self.catalog.items.items():
-            combined[str(code)]={'code':str(code),'name':identifier(item.get('representative_name') or item.get('item_name'))}
+            combined.setdefault(str(code),{'code':str(code),'name':identifier(item.get('representative_name') or item.get('item_name'))})
         if shipping:
             for key,item in shipping.items.items():
                 code=identifier(item.get('item_code')) or key
@@ -378,7 +436,7 @@ class Operations:
                 **component,
                 'quantity': source_quantity,
                 'source_quantity': source_quantity,
-                'name': product_name,
+                'name': self.item_name(item_code,product_name),
                 'wekeep_manage_code': identifier(mapping.get('wekeep_manage_code')) or item_code,
                 'wekeep_product_name': product_name,
                 'sku_no': sku_no,
@@ -820,6 +878,36 @@ class Operations:
             self.settings.setdefault('channel_customer_codes',{})[data['channel']] = customer
             self._write_settings()
 
+    def set_order_warehouse(self, ids, warehouse):
+        ids=list(dict.fromkeys(ids));code=warehouse_code(warehouse)
+        if not ids:
+            raise ValueError('출하창고를 변경할 주문을 선택하세요.')
+        marks=','.join('?' for _ in ids)
+        rows=self.db.execute(f'SELECT * FROM orders WHERE id IN ({marks})',ids).fetchall()
+        if len(rows) != len(ids):
+            raise ValueError('선택한 주문을 다시 확인하세요.')
+        if any(row['state'] not in ('검토 필요','출고 준비') for row in rows):
+            raise ValueError('출고요청 전 주문만 출하창고를 변경할 수 있습니다.')
+        with self.db:
+            for row in rows:
+                components=json.loads(row['components'])
+                if not components:
+                    raise ValueError('상품 매칭 후 출하창고를 입력하세요.')
+                for component in components:
+                    component['warehouse']=code
+                data=json.loads(row['data']);data['warehouse']=code
+                self.db.execute('UPDATE orders SET data=?,components=? WHERE id=?',(
+                    encode(data),encode(components),row['id'],
+                ))
+            self.event('주문 출하창고 변경',f'{len(rows)}건 / {code}')
+
+    @staticmethod
+    def order_warehouse(order):
+        warehouses={identifier(component.get('warehouse')) for component in order.get('components',[]) if identifier(component.get('warehouse'))}
+        if len(warehouses)==1:
+            return warehouses.pop()
+        return '혼합' if warehouses else ''
+
     def edit_delivery(self, order_id, fields):
         with self.db:
             row = self.db.execute('SELECT * FROM orders WHERE id=?', (order_id,)).fetchone()
@@ -846,14 +934,17 @@ class Operations:
             if os.path.exists(temporary):
                 os.unlink(temporary)
 
-    def request(self, ids, on, path, excluded_channels=None):
+    def request(self, ids, on, path, excluded_channels=None, warehouse=None):
         on = day(on)
         selected = [o for o in self.orders() if o['id'] in ids]
         if not selected or len(selected) != len(set(ids)):
             raise ValueError('선택한 주문을 다시 확인하세요.')
         orders = [o for o in selected if not is_excluded_channel(o['data'].get('channel'),excluded_channels)]
+        selected_warehouse=warehouse_code(warehouse) if identifier(warehouse) and identifier(warehouse)!='전체창고' else ''
+        if selected_warehouse:
+            orders=[o for o in orders if self.order_warehouse(o)==selected_warehouse]
         if not orders:
-            raise ValueError('선택한 주문이 모두 제외 판매처에 포함되어 있습니다.')
+            raise ValueError('선택한 조건에 맞는 주문이 없습니다. 판매처 제외와 출하창고를 확인하세요.')
         if any(o['state'] != '출고 준비' and not o['data'].get('force_shipping_approved') for o in orders):
             raise ValueError('출고 준비 또는 작업자가 강제 출고 승인한 주문만 선택하세요.')
         for order in orders:
@@ -1311,7 +1402,7 @@ class Operations:
             for index,component in enumerate(components):
                 entries.append({'source':'스마트스토어 ERP','id':f"SSERP:{row['id']}:{index}",'day':row['day'],
                     'channel':'스마트스토어','order_no':data.get('order_no',''),'recipient':data.get('recipient',''),
-                    'product':component.get('name') or component.get('code',''),'code':component.get('code',''),
+                    'product':self.item_name(component.get('code'),component.get('name')) or component.get('code',''),'code':component.get('code',''),
                     'quantity':component.get('quantity',data.get('quantity','')),'amount':component.get('amount',''),
                     'warehouse':component.get('warehouse',''),'tracking':'','issue':row['issue'],'erp_id':row['erp_id']})
         return entries
@@ -1319,6 +1410,7 @@ class Operations:
     def _shipment_component(self, shipment, order):
         """Return the export-only component without changing the saved product mapping."""
         component=dict(order['components'][shipment['component']])
+        component['name']=self.item_name(component.get('code'),component.get('name'))
         if shipment['erp_code']:
             component['code']=shipment['erp_code']
         if shipment['erp_name']:
@@ -1394,6 +1486,7 @@ class Operations:
             component = self._shipment_component(row,order)
             result.append({
                 'id':row['id'], 'day':row['day'], 'order_no':data['order_no'],
+                'channel':display_channel(data.get('channel')),
                 'recipient':data['recipient'], 'product':component.get('name') or component.get('code',''),
                 'code':component.get('code',''), 'quantity':row['qty'],
                 'amount':row['erp_amount'] or '', 'warehouse':component.get('warehouse',''),
@@ -1442,6 +1535,7 @@ class Operations:
             total=sum(number(component['amount']) for component in components)
             result.append({
                 'id':f'{order_id}|{shipping_day}','order_id':order_id,'day':shipping_day,
+                'channel':display_channel(order['data'].get('channel')),
                 'order_no':order['data']['order_no'],'recipient':order['data']['recipient'],
                 'components':components,'component_count':len(components),'total':str(total),
                 'summary':' / '.join(f"{item['name']} {item['amount']}원" for item in components),

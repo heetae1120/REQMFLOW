@@ -109,6 +109,36 @@ class LocalTests(unittest.TestCase):
         self.s.set_mapping(order['id'],[component])
         self.assertEqual(self.s.orders()[0]['state'],'출고 준비')
 
+    def test_packaged_item_names_are_seeded_and_worker_edits_are_preserved(self):
+        rows=self.s.item_name_rows()
+        self.assertEqual(len(rows),184)
+        self.assertEqual(self.s.item_name('QWC-Q3100S-BK'),'Q3100S 그레이')
+        self.s.save_item_name('QWC-Q3100S-BK','작업자 수정명')
+        self.s.close();self.s=Operations(self.folder/'data',REFERENCE)
+        self.assertEqual(self.s.item_name('QWC-Q3100S-BK'),'작업자 수정명')
+
+    def test_mapping_uses_matching_name_and_order_warehouse_can_filter_request(self):
+        _,first=self.import_order(line='WARE-100',fee=0)
+        self.map(first,[dict(
+            code='QWC-Q3100S-BK',logistics_code='QWC-Q3100S-BK',name='이전 품목명',
+            quantity=1,unit_amount=0,warehouse='300',customer='C100',
+        )])
+        _,second=self.import_order(line='WARE-300',fee=0,product='다른상품')
+        self.map(second,[dict(
+            code='QWC-Q3100S-WH',logistics_code='QWC-Q3100S-WH',name='이전 품목명',
+            quantity=1,unit_amount=0,warehouse='300',customer='C100',
+        )])
+        self.s.set_order_warehouse([first['id']],'100 본사창고')
+        current={order['data']['line_no']:order for order in self.s.orders()}
+        self.assertEqual(current['WARE-100']['components'][0]['name'],'Q3100S 그레이')
+        self.assertEqual(self.s.order_warehouse(current['WARE-100']),'100')
+        self.assertEqual(self.s.order_warehouse(current['WARE-300']),'300')
+        self.s.request(
+            [first['id'],second['id']],'2026-10-07',self.folder/'warehouse-100.xlsx',warehouse='100 본사창고',
+        )
+        requested=self.s.db.execute('SELECT order_id FROM request_lines').fetchall()
+        self.assertEqual([row['order_id'] for row in requested],[first['id']])
+
     def test_delivery_values_are_normalized_and_changes_are_recorded(self):
         path=self.folder/'delivery.xlsx'
         path.write_bytes(workbook_bytes(HEADERS,[['O2','L2','테스트상품','기본',1,1000,'수령인','82-010-1234-5678','12345','  서울  테스트로 1  ','B2',0,'결제완료','2026-09-30']]))

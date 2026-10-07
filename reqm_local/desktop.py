@@ -37,7 +37,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.12'
+APP_VERSION = '1.9.13'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -216,6 +216,7 @@ class Desktop:
         self.erp_excluded_channels=set(service.settings.get('erp_excluded_channels',[]))
         self.request_exclusion_text=tk.StringVar(value=self.exclusion_label(self.request_excluded_channels))
         self.erp_exclusion_text=tk.StringVar(value=self.exclusion_label(self.erp_excluded_channels))
+        self.request_warehouse=tk.StringVar(value='전체창고')
         matching_frame = ttk.Frame(tabs,padding=18)
         self.order_frame = ttk.Frame(tabs,padding=12)
         result_frame = ttk.Frame(tabs,padding=16)
@@ -291,6 +292,7 @@ class Desktop:
         organize.pack(side='left',fill='x',expand=True,padx=(0,6))
         self.button(organize,'＋ 주문 파일 입력',self.import_files,style='Accent.TButton')
         self.button(organize,'상품 매칭',self.mapping)
+        self.button(organize,'출하창고 입력',self.change_order_warehouse,style='Quiet.TButton')
         self.button(organize,'미매칭 검토',self.batch_matching_review)
         self.button(organize,'배송정보 수정',self.delivery)
         self.button(organize,'강제 승인',self.force_shipping_approval,style='Quiet.TButton')
@@ -299,6 +301,10 @@ class Desktop:
         release.pack(side='left',fill='x',padx=(6,0))
         ttk.Label(release,text='요청일').pack(side='left',padx=(0,4))
         ttk.Entry(release,textvariable=self.today,width=11).pack(side='left')
+        ttk.Combobox(
+            release,textvariable=self.request_warehouse,
+            values=['전체창고','100 본사창고','300 위킵창고'],state='readonly',width=14,
+        ).pack(side='left',padx=4)
         ttk.Button(release,textvariable=self.request_exclusion_text,command=lambda:self.safe(lambda:self.choose_channel_exclusions('request'))).pack(side='left',padx=4)
         self.button(release,'사전검사',self.preflight_review,style='Quiet.TButton')
         self.button(release,'선택 주문 파일 생성',self.request,style='Accent.TButton')
@@ -325,8 +331,8 @@ class Desktop:
         ttk.Label(self.order_frame,textvariable=self.detail,wraplength=1200,padding=(8,6),foreground='#64748B').pack(fill='x')
         self.table = self.tree(
             self.order_frame,
-            ['판매처','주문번호','이름','주소','연락처','상품명','매칭할 상품명','진행상태','작업구분'],
-            [125,155,110,330,135,300,320,95,120],
+            ['판매처','주문번호','이름','주소','연락처','상품명','매칭품목','출하창고','진행상태','작업구분'],
+            [125,155,110,330,135,300,280,110,95,120],
         )
         self.order_day.trace_add('write',lambda *_:self.refresh_orders_for_day())
         self.table.tag_configure('review',foreground='#BE123C',background='#FFF1F2')
@@ -366,7 +372,7 @@ class Desktop:
         ttk.Label(amount_line,text='실제 출고일').pack(side='left')
         self.date_picker(amount_line,self.erp_ship_day,'실제 출고일 선택').pack(side='left',padx=6)
         self.button(amount_line,'선택 주문 금액 나누기',self.split_order_amount,style='Accent.TButton')
-        self.erp_shipments = self.tree(amount_frame,['실제 출고일','주문번호','이름','구성품 수','주문 금액','현재 구성품별 금액'],[110,160,110,85,120,620])
+        self.erp_shipments = self.tree(amount_frame,['실제 출고일','판매처','주문번호','이름','구성품 수','주문 금액','현재 구성품별 금액'],[110,120,160,110,85,120,560])
         self.erp_shipments.bind('<Double-1>',lambda _event:self.safe(self.split_order_amount))
         self.erp_ship_day.trace_add('write',lambda *_:self.refresh_actual_erp_day())
         self.esm_start_day = tk.StringVar(value=date.today().isoformat())
@@ -442,6 +448,14 @@ class Desktop:
         self.button(line,'설정 다시 읽기',self.reload_settings)
         self.button(line,'DB 백업',self.backup)
         self.button(line,'저장 폴더 열기',lambda:os.startfile(service.folder))
+        item_box=ttk.LabelFrame(settings_frame,text='ERP 품목코드 · 매칭품목명 관리',padding=12)
+        item_box.pack(fill='both',expand=True,pady=(16,0))
+        item_actions=ttk.Frame(item_box);item_actions.pack(fill='x',pady=(0,8))
+        ttk.Label(item_actions,text='추가되는 품목의 ERP 코드와 화면에 표시할 매칭품목명을 등록합니다.',foreground='#64748B').pack(side='left')
+        self.button(item_actions,'새 품목 추가',lambda:self.edit_item_name(),style='Accent.TButton')
+        self.button(item_actions,'선택 품목 수정',self.edit_selected_item_name,style='Quiet.TButton')
+        self.item_name_tree=self.tree(item_box,['ERP 품목코드','매칭품목명'],[300,520])
+        self.item_name_tree.bind('<Double-1>',lambda _event:self.safe(self.edit_selected_item_name))
         tk.Label(content,text='LOCAL CACHE + SUPABASE LIVE WORKSPACE   ·   날짜 YYYY-MM-DD   ·   REQM FLOW',bg='#F4F7FB',fg='#94A3B8',font=(self.font_family,8,'bold'),pady=6).pack(fill='x')
         self.refresh()
         self.root.protocol('WM_DELETE_WINDOW',self.hide_to_tray)
@@ -1240,13 +1254,19 @@ class Desktop:
                 continue
             duplicate = '강제 승인' if d.get('force_shipping_approved') else (f"중복 {o['duplicate_count']}건" if o['duplicate_count'] > 1 else '')
             source_product=d.get('source_product',d['product']);source_option=d.get('source_option',d['option'])
-            converted=' / '.join(f"{c.get('name') or c.get('code')} [{c.get('logistics_code') or c.get('code')}]" for c in o['components'])
+            converted=' / '.join(
+                self.service.item_name(c.get('code'),c.get('name'))
+                for c in o['components'] if c.get('code') or c.get('name')
+            )
+            warehouse_code_value=self.service.order_warehouse(o)
+            warehouse={'100':'100 본사창고','300':'300 위킵창고'}.get(warehouse_code_value,warehouse_code_value)
             work_kind=[]
             if selected_day == o.get('registered_day'):work_kind.append('등록')
             if selected_day in o.get('request_days',[]):work_kind.append('출고요청')
             if selected_day in o.get('shipment_days',[]):work_kind.append('실제출고')
             if legacy_pending:work_kind.append('기존 미처리')
-            values=[channel,d['order_no'],d['recipient'],f"{d.get('postcode','')} {d['address']}".strip(),d['phone'],f"{source_product} / {source_option}",converted,o['state'],'·'.join(work_kind)]
+            source_name=' + '.join(part for part in (source_product,source_option) if identifier(part))
+            values=[channel,d['order_no'],d['recipient'],f"{d.get('postcode','')} {d['address']}".strip(),d['phone'],source_name,converted,warehouse,o['state'],'·'.join(work_kind)]
             selected_filter = self.filter.get()
             if selected_filter == '중복 주문' and o['duplicate_count'] <= 1:
                 continue
@@ -1293,6 +1313,7 @@ class Desktop:
         self.refresh_erp_shipments()
         self.refresh_confirmed_shipments()
         self.refresh_esm_entries()
+        self.refresh_item_names()
         self.refresh_channel_status()
         counts={state:sum(o['state']==state for o in self.rows.values()) for state in ['검토 필요','출고 준비','출고 요청','부분 출고','출고 완료']}
         stats=self.service.match_statistics(self.rows.values())
@@ -1348,7 +1369,27 @@ class Desktop:
         row = self.table.identify_row(event.y)
         if row:
             self.table.selection_set(row)
-            self.safe(self.mapping)
+            if self.table.identify_column(event.x)=='#8':
+                self.safe(self.change_order_warehouse)
+            else:
+                self.safe(self.mapping)
+
+    def change_order_warehouse(self):
+        ids=list(self.selected(self.table))
+        current=self.service.order_warehouse(self.rows[ids[0]])
+        initial={'100':'100 본사창고','300':'300 위킵창고'}.get(current,'300 위킵창고')
+        win=tk.Toplevel(self.root);win.title('주문 출하창고 입력');win.geometry('470x210');win.transient(self.root);win.grab_set()
+        body=ttk.Frame(win,padding=20);body.pack(fill='both',expand=True)
+        ttk.Label(body,text=f'선택 주문 {len(ids):,}건의 출하창고',font=(self.font_family,15,'bold')).pack(anchor='w')
+        value=tk.StringVar(value=initial)
+        ttk.Combobox(
+            body,textvariable=value,values=['100 본사창고','300 위킵창고'],state='readonly',width=28,
+        ).pack(anchor='w',pady=18)
+        def save():
+            self.service.set_order_warehouse(ids,value.get());win.destroy();self.refresh()
+        actions=ttk.Frame(body);actions.pack(fill='x')
+        self.button(actions,'적용',save,style='Accent.TButton')
+        self.button(actions,'취소',win.destroy,style='Quiet.TButton')
 
     def select_ready(self):
         self.table.selection_set([
@@ -1487,7 +1528,7 @@ class Desktop:
         ttk.Label(win,text='상품에 포함되는 출고 품목을 입력하세요. 첫 줄은 본품입니다.\n최종 출고수량은 모든 품목에 원본 엑셀 수량을 그대로 적용하며 구성 수량을 곱하지 않습니다.',padding=12).pack(anchor='w')
         grid=ttk.Frame(win,padding=12);grid.pack(fill='both',expand=True)
         fields=['code','logistics_code','name','quantity','warehouse','customer']
-        labels=['ERP 품목코드','물류사 품목코드','품목명','구성 수량(곱셈 안 함)','출하창고','거래처코드']
+        labels=['ERP 품목코드','물류사 품목코드','매칭품목명','구성 수량(곱셈 안 함)','출하창고','거래처코드']
         widths=[40,40,40,12,16,40]
         for column,label in enumerate(labels):ttk.Label(grid,text=label).grid(row=0,column=column,padx=3,pady=6)
         for column in (0,1,2,5):grid.columnconfigure(column,weight=2)
@@ -1495,10 +1536,8 @@ class Desktop:
         entries=[]
         customer=self.service.channel_customer_code(d['channel'])
         customer_choices=self.service.customer_choices()
-        catalog_choices = []
-        for code,item in sorted(self.service.catalog.items.items()):
-            name = item.get('representative_name') or item.get('item_name') or ''
-            catalog_choices.append(f'{code} · {name}' if name else code)
+        item_choices={item['code']:item['name'] for item in self.service.item_choices()}
+        catalog_choices=[f'{code} · {name}' if name else code for code,name in item_choices.items()]
         source_key=compact(f"{d['product']} {d['option']}")
         def score_choice(choice):
             return SequenceMatcher(None,source_key,compact(choice)).ratio()
@@ -1536,9 +1575,9 @@ class Desktop:
                         if field=='warehouse':
                             variables['warehouse'].set(value)
                             return
-                        variables['code'].set(value);item=self.service.catalog.items.get(value,{})
+                        variables['code'].set(value)
                         variables['logistics_code'].set(value)
-                        variables['name'].set(item.get('representative_name') or item.get('item_name') or value)
+                        variables['name'].set(self.service.item_name(value,item_choices.get(value,value)))
                     widget.bind('<<ComboboxSelected>>',chosen)
                     def search_catalog(event,widget=widget,choices=choices):
                         if event.keysym in ('Up','Down','Left','Right','Return','Escape','Tab'): return
@@ -1785,16 +1824,23 @@ class Desktop:
         ids=[key for key in selected if INTERNAL_TO_CHANNEL.get(
             self.rows[key]['data']['channel'],self.rows[key]['data']['channel']
         ) not in self.request_excluded_channels]
+        warehouse=self.request_warehouse.get()
+        if warehouse!='전체창고':
+            code=warehouse.split(' ',1)[0]
+            ids=[key for key in ids if self.service.order_warehouse(self.rows[key])==code]
         if not ids:
-            raise ValueError('선택한 주문이 모두 제외 판매처에 포함되어 있습니다.')
+            raise ValueError('선택한 조건에 맞는 주문이 없습니다. 판매처 제외와 출하창고를 확인하세요.')
         if not self.preflight_review(ids,show_success=False):return
         if not self.confirm_request_review(ids):return
-        path=self.save_path('출고요청_'+self.today.get()+'.xlsx')
+        warehouse_suffix='' if warehouse=='전체창고' else '_'+warehouse.split(' ',1)[0]
+        path=self.save_path('출고요청_'+self.today.get()+warehouse_suffix+'.xlsx')
         if path:
-            batch=self.service.request(ids,self.today.get(),path,excluded_channels=self.request_excluded_channels); self.refresh()
+            batch=self.service.request(
+                ids,self.today.get(),path,excluded_channels=self.request_excluded_channels,warehouse=warehouse,
+            ); self.refresh()
             excluded=len(selected)-len(ids)
-            suffix=f'\n제외 판매처 주문 {excluded:,}건은 포함하지 않았습니다.' if excluded else ''
-            messagebox.showinfo('파일 생성',f'{batch}\n출고요청 파일을 저장했습니다. 물류사 양식을 확인한 뒤 전달하세요.{suffix}')
+            suffix=f'\n선택 조건에서 제외된 주문 {excluded:,}건은 포함하지 않았습니다.' if excluded else ''
+            messagebox.showinfo('파일 생성',f'{batch}\n{warehouse} 출고요청 파일을 저장했습니다. 물류사 양식을 확인한 뒤 전달하세요.{suffix}')
 
     def result_template(self):
         path=self.save_path('위킵_출고결과_양식.xlsx')
@@ -2020,7 +2066,7 @@ class Desktop:
         for index,row in enumerate(self.service.pending_amount_splits(self.erp_ship_day.get())):
             item_id=f'amount-split-{index}';self.amount_split_rows[item_id]=row
             self.erp_shipments.insert('', 'end', iid=item_id, values=[
-                row['day'],row['order_no'],row['recipient'],row['component_count'],
+                row['day'],row['channel'],row['order_no'],row['recipient'],row['component_count'],
                 f"{int(Decimal(row['total'])):,}",row['summary'],
             ])
         self.root.after_idle(lambda:autosize_tree(self.erp_shipments,maximum=320))
@@ -2206,6 +2252,37 @@ class Desktop:
         self.service.settings=settings_at(self.service.folder)
         self.load_matching_profile()
         messagebox.showinfo('설정','설정을 다시 읽었습니다. 기존 출고 구성과 파일은 변경되지 않습니다.')
+
+    def refresh_item_names(self):
+        if not hasattr(self,'item_name_tree'):return
+        self.item_name_tree.delete(*self.item_name_tree.get_children())
+        self.item_name_rows={}
+        for index,row in enumerate(self.service.item_name_rows()):
+            item_id=f'item-name-{index}';self.item_name_rows[item_id]=row
+            self.item_name_tree.insert('', 'end',iid=item_id,values=[row['erp_item_code'],row['matching_name']])
+        self.root.after_idle(lambda:autosize_tree(self.item_name_tree,maximum=600))
+
+    def edit_selected_item_name(self):
+        item_id=self.selected(self.item_name_tree)[0]
+        self.edit_item_name(self.item_name_rows[item_id])
+
+    def edit_item_name(self, row=None):
+        row=row or {}
+        win=tk.Toplevel(self.root);win.title('ERP 품목 기준 저장');win.geometry('620x260');win.transient(self.root);win.grab_set()
+        body=ttk.Frame(win,padding=18);body.pack(fill='both',expand=True)
+        ttk.Label(body,text='ERP 품목코드와 매칭품목명',font=(self.font_family,16,'bold')).grid(row=0,column=0,columnspan=2,sticky='w',pady=(0,16))
+        ttk.Label(body,text='ERP 품목코드').grid(row=1,column=0,sticky='w',pady=6)
+        ttk.Label(body,text='매칭품목명').grid(row=2,column=0,sticky='w',pady=6)
+        code=tk.StringVar(value=row.get('erp_item_code',''));name=tk.StringVar(value=row.get('matching_name',''))
+        ttk.Entry(body,textvariable=code,width=48).grid(row=1,column=1,sticky='ew',padx=(12,0),pady=6)
+        ttk.Entry(body,textvariable=name,width=48).grid(row=2,column=1,sticky='ew',padx=(12,0),pady=6)
+        body.columnconfigure(1,weight=1)
+        def save():
+            self.service.save_item_name(code.get(),name.get(),row.get('erp_item_code',''))
+            win.destroy();self.refresh_item_names();self.refresh_orders();self.refresh_confirmed_shipments()
+        actions=ttk.Frame(body);actions.grid(row=3,column=0,columnspan=2,sticky='w',pady=(18,0))
+        self.button(actions,'저장',save,style='Accent.TButton')
+        self.button(actions,'취소',win.destroy,style='Quiet.TButton')
 
     def backup(self):
         path=filedialog.asksaveasfilename(initialfile=f'reqm_backup_{date.today()}.sqlite3',defaultextension='.sqlite3')

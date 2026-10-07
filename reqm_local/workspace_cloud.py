@@ -8,9 +8,9 @@ from pathlib import Path
 
 
 WORKSPACE_KEY = "default"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 TABLE_ORDER = (
-    "orders", "mappings", "event_rules", "requests", "request_lines",
+    "orders", "mappings", "item_names", "event_rules", "requests", "request_lines",
     "shipments", "smartstore_erp_rows", "smartstore_purchase_rows", "esm_erp_rows",
     "fees", "artifacts", "source_files", "artifact_notes", "events",
 )
@@ -51,7 +51,7 @@ def workspace_digest(state: dict) -> str:
 
 def import_workspace(service, state: dict) -> None:
     source_version=int(state.get("schema_version",0))
-    if source_version not in (1, 2, 3, 4, 5, SCHEMA_VERSION):
+    if source_version not in (1, 2, 3, 4, 5, 6, SCHEMA_VERSION):
         raise RuntimeError("지원하지 않는 공유 DB 형식입니다.")
     tables = state.get("tables") or {}
     with service.db:
@@ -75,6 +75,8 @@ def import_workspace(service, state: dict) -> None:
                 ).fetchone()[0]
                 if count > 1:
                     service.db.execute('UPDATE shipments SET amount_split_confirmed=0 WHERE id=?',(row['id'],))
+        if source_version < 7:
+            service.seed_item_names()
     local_email = service.settings.get("cloud_email","")
     remote_settings = dict(state.get("settings") or {})
     remote_settings["cloud_email"] = local_email
