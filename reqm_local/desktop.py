@@ -12,7 +12,7 @@ import calendar
 import tkinter.font as tkfont
 from difflib import SequenceMatcher
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox, simpledialog
 
@@ -37,7 +37,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.11'
+APP_VERSION = '1.9.12'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -79,6 +79,19 @@ def matching_header_row_number(value) -> int:
     if not match or int(match.group(1)) < 1:
         raise ValueError('헤더 행 번호를 올바르게 입력하세요.')
     return int(match.group(1))
+
+
+def amount_split_totals(total, values):
+    """Return the order total, entered sum, and live difference for split amounts."""
+    try:
+        expected=Decimal(str(total or '0').replace(',','').strip() or '0')
+        entered=sum(
+            (Decimal(str(value or '').replace(',','').strip() or '0') for value in values),
+            Decimal('0'),
+        )
+    except InvalidOperation:
+        return None
+    return expected,entered,entered-expected
 
 
 def asset_path(*parts: str) -> Path:
@@ -2015,9 +2028,9 @@ class Desktop:
     def split_order_amount(self):
         item_id=self.selected(self.erp_shipments)[0]
         row=self.amount_split_rows[item_id]
-        win=tk.Toplevel(self.root);win.title('구성품별 금액 나누기');win.geometry('900x520');win.transient(self.root);win.grab_set()
+        win=tk.Toplevel(self.root);win.title('구성품별 금액 나누기');win.geometry('900x600');win.transient(self.root);win.grab_set()
         ttk.Label(win,text='구성품별 금액 나누기',font=(self.font_family,17,'bold'),padding=(18,16)).pack(anchor='w')
-        ttk.Label(win,text=f"주문번호 {row['order_no']} · {row['recipient']} · 주문 금액 {int(Decimal(row['total'])):,}원",padding=(18,0)).pack(anchor='w')
+        ttk.Label(win,text=f"주문번호 {row['order_no']} · {row['recipient']}",padding=(18,0)).pack(anchor='w')
         ttk.Label(win,text='각 구성품의 총 반영금액을 입력하세요. 합계가 주문 금액과 같아야 저장됩니다.',foreground='#64748B',padding=(18,7)).pack(anchor='w')
         grid=ttk.Frame(win,padding=18);grid.pack(fill='both',expand=True)
         for column,label in enumerate(('ERP 품목코드','ERP 품목명','출고수량','반영금액')):
@@ -2030,6 +2043,14 @@ class Desktop:
             variable=tk.StringVar(value=str(int(Decimal(component['amount']))));amounts[component['index']]=variable
             ttk.Entry(grid,textvariable=variable,width=18).grid(row=position,column=3,sticky='w',padx=5,pady=6)
         grid.columnconfigure(1,weight=1)
+        summary=ttk.Frame(win,padding=(18,8));summary.pack(fill='x')
+        total_text=tk.StringVar(value=f"주문 전체금액  {int(Decimal(row['total'])):,}원")
+        entered_text=tk.StringVar()
+        difference_text=tk.StringVar()
+        ttk.Label(summary,textvariable=total_text,font=(self.font_family,11,'bold')).pack(anchor='w')
+        ttk.Label(summary,textvariable=entered_text,font=(self.font_family,11,'bold')).pack(anchor='w',pady=(5,0))
+        difference_label=ttk.Label(summary,textvariable=difference_text,font=(self.font_family,11,'bold'))
+        difference_label.pack(anchor='w',pady=(5,0))
         def save():
             self.service.set_amount_split(
                 row['order_id'],row['day'],
@@ -2037,8 +2058,34 @@ class Desktop:
             )
             win.destroy();self.refresh_erp_shipments();self.refresh_confirmed_shipments()
         actions=ttk.Frame(win,padding=18);actions.pack(fill='x')
-        self.button(actions,'저장',save,style='Accent.TButton')
+        save_button=ttk.Button(actions,text='저장',style='Accent.TButton',command=lambda:self.safe(save))
+        save_button.pack(side='left',padx=4)
         self.button(actions,'취소',win.destroy,style='Quiet.TButton')
+        def refresh_totals(*_):
+            totals=amount_split_totals(row['total'],[variable.get() for variable in amounts.values()])
+            if totals is None:
+                entered_text.set('현재 입력 합계  계산할 수 없음')
+                difference_text.set('금액에는 숫자와 쉼표만 입력하세요.')
+                difference_label.configure(foreground='#BE123C')
+                save_button.state(['disabled'])
+                return
+            _expected,entered,difference=totals
+            entered_text.set(f'현재 입력 합계  {int(entered):,}원')
+            if difference > 0:
+                difference_text.set(f'전체금액 대비 +{int(difference):,}원 초과')
+                difference_label.configure(foreground='#BE123C')
+                save_button.state(['disabled'])
+            elif difference < 0:
+                difference_text.set(f'전체금액 대비 -{abs(int(difference)):,}원 부족')
+                difference_label.configure(foreground='#BE123C')
+                save_button.state(['disabled'])
+            else:
+                difference_text.set('전체금액과 일치합니다.')
+                difference_label.configure(foreground='#15803D')
+                save_button.state(['!disabled'])
+        for variable in amounts.values():
+            variable.trace_add('write',refresh_totals)
+        refresh_totals()
 
     def match_erp_amount(self):
         shipment_id=self.selected(self.erp_shipments)[0]

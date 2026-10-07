@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 import zipfile
+from decimal import Decimal
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -23,7 +24,7 @@ from reqm_local.workspace_cloud import export_workspace, import_workspace, works
 from reqm_local import cloud
 from reqm_local.updater import UPDATE_BUCKET, prepare_update, update_manifest_url, version_tuple
 from reqm_local.desktop import (
-    COMPLETED_ORDER_STATES, FIELD_LABELS, MAPPING_FIELD_ORDER, calendar_month_days,
+    COMPLETED_ORDER_STATES, FIELD_LABELS, MAPPING_FIELD_ORDER, amount_split_totals, calendar_month_days,
     matching_header_row_number,
 )
 from reqm_local.profiles import (
@@ -47,6 +48,14 @@ class LocalTests(unittest.TestCase):
         weeks=calendar_month_days(2026,10)
         self.assertEqual(weeks[0],[0,0,0,0,1,2,3])
         self.assertEqual([day for week in weeks for day in week if day],list(range(1,32)))
+
+    def test_amount_split_totals_report_live_over_under_and_invalid_values(self):
+        self.assertEqual(amount_split_totals('39,900',['33000','6900']),(
+            Decimal('39900'),Decimal('39900'),Decimal('0'),
+        ))
+        self.assertEqual(amount_split_totals('39,900',['39900','6900'])[2],Decimal('6900'))
+        self.assertEqual(amount_split_totals('39,900',['30000',''])[2],Decimal('-9900'))
+        self.assertIsNone(amount_split_totals('39,900',['문자','6900']))
 
     def test_tree_sort_values_handle_numbers_and_text(self):
         self.assertLess(tree_sort_value('2'),tree_sort_value('10'))
