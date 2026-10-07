@@ -1,5 +1,6 @@
 """Packaged end-to-end smoke test. Creates only synthetic data in the supplied folder."""
 import json
+import os
 import sys
 from pathlib import Path
 import tkinter as tk
@@ -35,6 +36,17 @@ def run(folder):
         service.export_erp('2026-10-01','2026-10-01',folder/'demo-erp.xlsx')
         root=tk.Tk();root.withdraw();app=Desktop(root,service);root.update_idletasks()
         assert root.title().startswith('REQM FLOW')
+        from .closed_malls import MALLS
+        assert len(app.closed_mall_panel.table.get_children()) == len(MALLS)
+        assert set(app.closed_mall_panel.table.selection()) == {'musinsa', '29cm'}
+        if os.environ.get('REQM_LOGIN_BROWSER_TEST') == '1':
+            from .closed_mall_browser import create_login_driver
+            driver = create_login_driver(folder / 'browser-smoke', True)
+            try:
+                driver.get('data:text/html,<title>REQM-login-smoke</title><p>synthetic</p>')
+                assert driver.title == 'REQM-login-smoke'
+            finally:
+                driver.quit()
         assert app.font_family == 'Pretendard'
         assert app.matching_sites.get(1) == '스마트스토어 ERP매칭'
         assert tuple(app.confirmed_shipments['columns']) == ('구분','출고일','판매처','주문번호','이름','품목','수량','송장번호')

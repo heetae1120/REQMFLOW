@@ -37,7 +37,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.10'
+APP_VERSION = '1.9.11'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -208,9 +208,13 @@ class Desktop:
         result_frame = ttk.Frame(tabs,padding=16)
         history_frame = ttk.Frame(tabs,padding=12)
         settings_frame = ttk.Frame(tabs,padding=16)
+        login_frame = ttk.Frame(tabs,padding=16)
         for frame,title in [(matching_frame,'★  매칭 설정'),(self.order_frame,'1  주문 · 출고요청'),(result_frame,'2  실제 출고 · ERP'),(history_frame,'3  출력 이력'),(settings_frame,'4  설정 · 백업')]:
             tabs.add(frame,text=title)
-        nav_items = [('✦  매칭 설정',0),('▣  주문 · 출고요청',1),('↗  실제 출고 · ERP',2),('◫  출력 이력',3),('⚙  설정 · 백업',4)]
+        tabs.add(login_frame,text='5  폐쇄몰 로그인')
+        from .closed_mall_ui import ClosedMallPanel
+        self.closed_mall_panel = ClosedMallPanel(login_frame, self.root)
+        nav_items = [('✦  매칭 설정',0),('▣  주문 · 출고요청',1),('↗  실제 출고 · ERP',2),('◫  출력 이력',3),('⚙  설정 · 백업',4),('◉  폐쇄몰 로그인',5)]
         self.nav_buttons = []
         def select_page(index):
             tabs.select(index)
@@ -671,6 +675,7 @@ class Desktop:
 
     def quit_app(self):
         self._quitting = True
+        self.closed_mall_panel.shutdown()
         if self.tray_icon:
             try:self.tray_icon.stop()
             except Exception:pass
