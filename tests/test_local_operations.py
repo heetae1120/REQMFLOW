@@ -905,6 +905,36 @@ class LocalTests(unittest.TestCase):
         book=load_workbook(target,data_only=True);row=list(book.active.values)[1];book.close()
         self.assertEqual((row[5],row[12]),(100,'EXCEL-ONLY'))
 
+    def test_erp_regeneration_uses_current_warehouse_without_changing_erp_state(self):
+        _,order=self.import_order(q=1,amount=10000,fee=0)
+        line=self.request(order);self.result(line,1,on='2026-10-07')
+        original=self.folder/'original.xlsx'
+        batch=self.s.export_erp('2026-10-07','2026-10-07',original)
+        self.s.mark_registered(batch)
+        before=self.s.db.execute(
+            'SELECT erp_id FROM shipments WHERE line_id=?',(line,),
+        ).fetchone()['erp_id']
+        artifact_count=self.s.db.execute('SELECT COUNT(*) FROM artifacts').fetchone()[0]
+        self.assertEqual(self.s.pending_erp_shipments('2026-10-07'),[])
+
+        self.s.set_order_warehouse([order['id']],'100')
+        regenerated=self.folder/'regenerated.xlsx'
+        self.s.regenerate_erp(batch,regenerated)
+
+        original_book=load_workbook(original,data_only=True)
+        original_row=list(original_book.active.values)[1];original_book.close()
+        regenerated_book=load_workbook(regenerated,data_only=True)
+        regenerated_row=list(regenerated_book.active.values)[1];regenerated_book.close()
+        self.assertEqual((original_row[5],regenerated_row[5]),(300,100))
+        self.assertEqual(self.s.db.execute(
+            'SELECT erp_id FROM shipments WHERE line_id=?',(line,),
+        ).fetchone()['erp_id'],before)
+        artifact=self.s.db.execute('SELECT registered FROM artifacts WHERE id=?',(batch,)).fetchone()
+        self.assertEqual(
+            (artifact['registered'],self.s.db.execute('SELECT COUNT(*) FROM artifacts').fetchone()[0]),
+            (1,artifact_count),
+        )
+
     def test_shipping_alias_requires_verified_skus_and_keeps_source_quantity(self):
         source='배터리 케이블 기본'
         self.s.catalog.shipping_catalog=ShippingCatalog(

@@ -37,7 +37,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.14'
+APP_VERSION = '1.9.15'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -420,7 +420,7 @@ class Desktop:
         ttk.Checkbutton(line,text='ESM 포함',variable=self.erp_include_esm).pack(side='left',padx=(14,4))
         ttk.Button(line,textvariable=self.erp_exclusion_text,command=lambda:self.safe(lambda:self.choose_channel_exclusions('erp'))).pack(side='left',padx=4)
         self.button(line,'ERP 파일 생성',self.erp,style='Accent.TButton')
-        self.button(line,'기존 ERP 파일 다시 다운로드',self.download_erp_again,style='Quiet.TButton')
+        self.button(line,'현재 정보로 ERP 재다운로드',self.download_erp_again,style='Quiet.TButton')
         ttk.Label(erp_card,text='이미 생성한 출고는 제외됩니다. 배송비는 묶음 전체 출고 완료 후 한 번 반영하며, 부가세 포함·10% 과세 기준입니다.',foreground='#64748B',wraplength=1000).pack(anchor='w',pady=(16,0))
         self.history_day=tk.StringVar(value=date.today().isoformat())
         self.history_show_all=True
@@ -2218,10 +2218,10 @@ class Desktop:
 
     def download_erp_again(self):
         artifacts=[row for row in self.service.artifacts() if row['kind'] in ('ERP','ESM ERP')]
-        if not artifacts:raise ValueError('다시 다운로드할 ERP 파일 이력이 없습니다.')
-        win=tk.Toplevel(self.root);win.title('기존 ERP 파일 다시 다운로드');win.geometry('720x480');win.transient(self.root);win.grab_set()
-        ttk.Label(win,text='기존 ERP 파일 다시 다운로드',font=(self.font_family,17,'bold'),padding=(18,16)).pack(anchor='w')
-        ttk.Label(win,text='생성 당시의 ERP Excel 원본을 그대로 다시 저장합니다.',foreground='#64748B',padding=(18,0)).pack(anchor='w')
+        if not artifacts:raise ValueError('재생성할 ERP 파일 이력이 없습니다.')
+        win=tk.Toplevel(self.root);win.title('현재 정보로 ERP 재다운로드');win.geometry('720x480');win.transient(self.root);win.grab_set()
+        ttk.Label(win,text='현재 정보로 ERP 재다운로드',font=(self.font_family,17,'bold'),padding=(18,16)).pack(anchor='w')
+        ttk.Label(win,text='선택한 이력의 주문을 현재 DB의 최신 주문·출고·창고 정보로 다시 생성합니다.',foreground='#64748B',padding=(18,0)).pack(anchor='w')
         tree=self.tree(win,['출력일','종류','파일 ID','등록 확인'],[120,120,260,100])
         rows={}
         for index,row in enumerate(artifacts):
@@ -2229,13 +2229,13 @@ class Desktop:
             tree.insert('', 'end',iid=item_id,values=[row['day'],row['kind'],row['id'],'확인 완료' if row['registered'] else '—'])
         def save():
             selected=tree.selection()
-            if not selected:raise ValueError('다시 다운로드할 ERP 파일을 선택하세요.')
+            if not selected:raise ValueError('재생성할 ERP 파일 이력을 선택하세요.')
             row=rows[selected[0]];path=self.save_path(f"{row['kind']}_{row['day']}_{row['id']}.xlsx")
             if path:
-                self.service.reexport(row['id'],path);win.destroy()
-                messagebox.showinfo('ERP 파일 저장','기존 ERP 파일을 다시 저장했습니다.',parent=self.root)
+                self.service.regenerate_erp(row['id'],path);win.destroy()
+                messagebox.showinfo('ERP 파일 저장','현재 주문정보 기준으로 ERP 파일을 새로 생성했습니다. ERP 반영 상태는 변경되지 않았습니다.',parent=self.root)
         actions=ttk.Frame(win,padding=14);actions.pack(fill='x')
-        self.button(actions,'선택 파일 다운로드',save,style='Accent.TButton')
+        self.button(actions,'현재 정보로 재생성',save,style='Accent.TButton')
         self.button(actions,'닫기',win.destroy,style='Quiet.TButton')
 
     def reexport(self):

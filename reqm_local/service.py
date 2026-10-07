@@ -1877,6 +1877,85 @@ class Operations:
             raise ValueError('출력 이력을 찾지 못했습니다.')
         Path(path).write_bytes(row[0])
 
+    def regenerate_erp(self, artifact_id, path):
+        """Rebuild a previous ERP selection from current DB values without changing ERP state."""
+        artifact=self.db.execute(
+            "SELECT id,kind FROM artifacts WHERE id=? AND kind IN ('ERP','ESM ERP')",(artifact_id,),
+        ).fetchone()
+        if not artifact:
+            raise ValueError('ERP 파일 이력을 찾지 못했습니다.')
+        shipments=self.db.execute('''SELECT s.*,r.order_id,r.component FROM shipments s
+            JOIN request_lines r ON s.line_id=r.id
+            WHERE s.erp_id=? ORDER BY s.day,s.rowid''',(artifact_id,)).fetchall()
+        smart_rows=self.db.execute(
+            'SELECT * FROM smartstore_erp_rows WHERE erp_id=? ORDER BY day,rowid',(artifact_id,),
+        ).fetchall()
+        esm_rows=self.db.execute(
+            'SELECT * FROM esm_erp_rows WHERE erp_id=? ORDER BY day,rowid',(artifact_id,),
+        ).fetchall()
+        if not shipments and not smart_rows and not esm_rows:
+            raise ValueError('선택한 ERP 이력에 연결된 주문을 찾지 못했습니다.')
+
+        orders={order['id']:order for order in self.orders()}
+        rows=[]
+        def append(component, shipped_quantity, amount):
+            q=quantity(shipped_quantity)
+            total=int(number(amount).quantize(Decimal('1'),rounding=ROUND_HALF_UP))
+            price,remainder=divmod(total,q)
+            for count,unit in ((q-remainder,price),(remainder,price+1)):
+                if count:
+                    supply=int((Decimal(unit*count)/Decimal('1.1')).quantize(Decimal('1'),rounding=ROUND_HALF_UP))
+                    rows.append([
+                        None,None,component['customer'],None,self.settings['manager_code'],
+                        int(warehouse_code(component['warehouse'])),None,None,None,None,None,None,
+                        component['code'],None,None,count,unit,None,supply,unit*count-supply,None,None,
+                    ])
+
+        included_order_ids=set()
+        for shipment in shipments:
+            order=orders.get(shipment['order_id'])
+            if not order:
+                raise ValueError('ERP 재생성에 필요한 현재 주문정보를 찾지 못했습니다.')
+            append(self._shipment_component(shipment,order),shipment['qty'],shipment['erp_amount'])
+            included_order_ids.add(shipment['order_id'])
+        for smart_row in smart_rows:
+            for component in json.loads(smart_row['components']):
+                append(component,component['quantity'],component['amount'])
+        for esm_row in esm_rows:
+            for component in json.loads(esm_row['components']):
+                append(component,component['quantity'],component['amount'])
+
+        # Preserve which fee rows belonged to this artifact, but rebuild their values
+        # from the current order data.
+        fee_bundles={row['bundle'] for row in self.db.execute(
+            'SELECT bundle FROM fees WHERE erp_id=?',(artifact_id,),
+        )}
+        for bundle in fee_bundles:
+            group=[order for order in orders.values()
+                   if order['id'] in included_order_ids and self.bundle_key(order['data'])==bundle]
+            if not group:
+                continue
+            amounts={number(order['data']['shipping']) for order in group}
+            if len(amounts)!=1:
+                raise ValueError('동일 배송비 묶음의 현재 금액이 서로 다릅니다. ERP 재생성을 중단합니다.')
+            fee=amounts.pop()
+            if fee:
+                base=dict(group[0]['components'][0])
+                append({**base,'code':'택배운송비','name':'배송비'},1,fee)
+
+        rows.sort(key=lambda row:(0 if row[5]==100 else 1))
+        headers=['일자','순번','거래처코드','거래처명','담당자','출하창고','거래유형','통화','환율','계좌번호','미수금','특이사항','품목코드','품목명','규격','수량','단가','외화금액','공급가액','부가세','비고','생산전표생성']
+        content=workbook_bytes(headers,rows,'이카운트 웹입력')
+        target=Path(path);target.parent.mkdir(parents=True,exist_ok=True)
+        fd,temporary=tempfile.mkstemp(suffix='.xlsx',dir=target.parent)
+        try:
+            with os.fdopen(fd,'wb') as handle:
+                handle.write(content)
+            os.replace(temporary,target)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
     def mark_registered(self, artifact_id):
         with self.db:
             if not self.db.execute("SELECT 1 FROM artifacts WHERE id=? AND kind IN ('ERP','ESM ERP')",(artifact_id,)).fetchone():
