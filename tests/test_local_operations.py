@@ -219,6 +219,23 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(self.s.settings['profiles'][0]['detected_headers']['1'],'주문번호')
         self.assertEqual(workspace_digest(export_workspace(self.s)),digest)
 
+    def test_version_five_workspace_marks_existing_multi_component_shipments_for_split(self):
+        _,order=self.import_order(q=1,amount=10000,fee=0)
+        self.map(order,[
+            dict(code='A',logistics_code='A',name='본품',quantity=1,unit_amount=0,warehouse='300',customer='C'),
+            dict(code='B',logistics_code='B',name='부속품',quantity=1,unit_amount=1000,warehouse='300',customer='C'),
+        ])
+        self.s.request([order['id']],'2026-10-07',self.folder/'legacy-request.xlsx')
+        lines=self.s.db.execute('SELECT id FROM request_lines WHERE order_id=? ORDER BY component',(order['id'],)).fetchall()
+        self.result(lines[0]['id'],1,tracking='A',on='2026-10-07')
+        self.result(lines[1]['id'],1,tracking='B',on='2026-10-07')
+        state=export_workspace(self.s);state['schema_version']=5
+        for shipment in state['tables']['shipments']:
+            for key in ('erp_code','erp_name','erp_warehouse','amount_split_confirmed'):
+                shipment.pop(key,None)
+        import_workspace(self.s,state)
+        self.assertEqual(len(self.s.pending_amount_splits('2026-10-07')),1)
+
     def import_order(self, q=3, amount=10001, line='A1', fee=3000, bundle='B1', product='테스트상품', channel='오늘의집'):
         path=self.folder/f'{line}.xlsx'
         path.write_bytes(workbook_bytes(HEADERS,[['O1',line,product,'기본',q,amount,'가상수령인','01000000000','00123','테스트 주소',bundle,fee,'결제완료','2026-09-30']]))
@@ -793,6 +810,41 @@ class LocalTests(unittest.TestCase):
         result=self.s.orders()[0]['components']
         self.assertEqual([c['quantity'] for c in result],[2,2])
         self.assertEqual([c['amount'] for c in result],['18000','2000'])
+
+    def test_only_multi_component_orders_require_amount_split_confirmation(self):
+        _,order=self.import_order(q=2,amount=20000,fee=0)
+        self.map(order,[
+            dict(code='MAIN',logistics_code='M',name='본품',quantity=1,unit_amount=0,warehouse='300',customer='C'),
+            dict(code='CASE',logistics_code='C',name='케이스',quantity=1,unit_amount=1000,warehouse='300',customer='C'),
+        ])
+        self.s.request([order['id']],'2026-10-07',self.folder/'multi-request.xlsx')
+        lines=self.s.db.execute('SELECT id FROM request_lines WHERE order_id=? ORDER BY component',(order['id'],)).fetchall()
+        self.result(lines[0]['id'],2,tracking='MAIN-T',on='2026-10-07')
+        self.result(lines[1]['id'],2,tracking='CASE-T',on='2026-10-07')
+        pending=self.s.pending_amount_splits('2026-10-07')
+        self.assertEqual(len(pending),1)
+        self.assertEqual([(item['code'],item['amount']) for item in pending[0]['components']],[('MAIN','18000'),('CASE','2000')])
+        with self.assertRaisesRegex(ValueError,'구성품별 금액 분리'):
+            self.s.export_erp('2026-10-07','2026-10-07',self.folder/'blocked.xlsx')
+        self.s.set_amount_split(order['id'],'2026-10-07',{0:'15000',1:'5000'})
+        self.assertEqual(self.s.pending_amount_splits('2026-10-07'),[])
+        target=self.folder/'split.xlsx';self.s.export_erp('2026-10-07','2026-10-07',target)
+        book=load_workbook(target,data_only=True);rows=list(book.active.values)[1:];book.close()
+        totals={code:sum(row[15]*row[16] for row in rows if row[12]==code) for code in ('MAIN','CASE')}
+        self.assertEqual(totals,{'MAIN':15000,'CASE':5000})
+
+    def test_actual_shipment_item_and_warehouse_override_only_affects_export(self):
+        _,order=self.import_order(q=1,amount=10000,fee=0)
+        line=self.request(order);self.result(line,1,on='2026-10-07')
+        shipment=self.s.pending_erp_shipments('2026-10-07')[0]
+        self.s.set_erp_entry_output(shipment['id'],code='EXCEL-ONLY',name='엑셀 전용 품목',warehouse='100')
+        saved=next(item for item in self.s.orders() if item['id']==order['id'])['components'][0]
+        self.assertEqual((saved['code'],saved['name'],saved['warehouse']),('TEST','테스트','300'))
+        confirmed=self.s.confirmed_erp_entries('2026-10-07')[0]
+        self.assertEqual((confirmed['code'],confirmed['product'],confirmed['warehouse']),('EXCEL-ONLY','엑셀 전용 품목','100'))
+        target=self.folder/'override.xlsx';self.s.export_erp('2026-10-07','2026-10-07',target)
+        book=load_workbook(target,data_only=True);row=list(book.active.values)[1];book.close()
+        self.assertEqual((row[5],row[12]),(100,'EXCEL-ONLY'))
 
     def test_shipping_alias_requires_verified_skus_and_keeps_source_quantity(self):
         source='배터리 케이블 기본'

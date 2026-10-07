@@ -36,7 +36,7 @@ def upload(base, bucket, object_name, content, content_type, headers):
 def main():
     parser=argparse.ArgumentParser(description='Supabase에 REQM FLOW EXE 업데이트 게시')
     parser.add_argument('version',help='예: 1.9.8')
-    parser.add_argument('exe',nargs='?',default=str(ROOT/'dist/REQM_FLOW/REQM_FLOW.exe'))
+    parser.add_argument('exe',nargs='?',default=str(ROOT/'dist/REQM_FLOW.exe'))
     args=parser.parse_args()
     if not re.fullmatch(r'\d+\.\d+\.\d+',args.version):
         raise SystemExit('버전은 1.9.8 형식으로 입력하세요.')

@@ -116,3 +116,19 @@ Remove-Item -LiteralPath $PSScriptRoot -Recurse -Force
 
 def install_directory():
     return Path(sys.executable).resolve().parent
+
+
+def cleanup_legacy_install():
+    """Remove only a verified old PyInstaller onedir runtime after onefile starts."""
+    if not getattr(sys,'frozen',False):
+        return False
+    install_dir=install_directory()
+    legacy=install_dir/'_internal'
+    markers=(legacy/'base_library.zip',legacy/'assets'/'branding',legacy/'reference_data')
+    if not all(marker.exists() for marker in markers):
+        return False
+    shutil.rmtree(legacy)
+    previous=install_dir/'REQM_FLOW.previous.exe'
+    if previous.is_file():
+        previous.unlink()
+    return True

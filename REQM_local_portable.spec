@@ -1,6 +1,9 @@
 # Build: python tools/build_portable.py
 from pathlib import Path
+import sys
 from PyInstaller.utils.hooks import collect_submodules
+
+sys.path.insert(0, str(Path('.builddeps').resolve()))
 
 datas=[
     ('supabase/ecount_migration/data','reference_data'),
@@ -15,7 +18,7 @@ a = Analysis(
     ['reqm_local_app.py'],
     pathex=[],
     datas=datas,
-    hiddenimports=['xlrd','pystray._win32','supabase',*selenium_hiddenimports],
+    hiddenimports=['xlrd','msoffcrypto','olefile','cryptography','tkinterdnd2','pystray._win32','supabase','reqm_local.updater',*selenium_hiddenimports],
     binaries=[],
     excludes=['PySide6','numpy','pandas','matplotlib','scipy','IPython','pytest'],
 )
@@ -26,7 +29,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='REQM_FLOW_Portable',
+    name='REQM_FLOW',
     console=False,
     icon='assets/branding/rq_app.ico',
 )

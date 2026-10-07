@@ -47,4 +47,10 @@ if __name__ == '__main__':
             os._exit(1)
         os._exit(0)
     else:
+        if getattr(sys,'frozen',False):
+            try:
+                from reqm_local.updater import cleanup_legacy_install
+                cleanup_legacy_install()
+            except OSError:
+                pass
         main()

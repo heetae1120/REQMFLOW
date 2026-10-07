@@ -121,6 +121,8 @@ class Operations:
             UNIQUE(order_id, component));
         CREATE TABLE IF NOT EXISTS shipments(id TEXT PRIMARY KEY, line_id TEXT REFERENCES request_lines(id),
             qty INTEGER NOT NULL, tracking TEXT NOT NULL, day TEXT NOT NULL, erp_id TEXT, erp_amount TEXT,
+            erp_code TEXT, erp_name TEXT, erp_warehouse TEXT,
+            amount_split_confirmed INTEGER NOT NULL DEFAULT 1,
             UNIQUE(line_id,tracking,day));
         CREATE TABLE IF NOT EXISTS smartstore_erp_rows(id TEXT PRIMARY KEY, identity TEXT UNIQUE NOT NULL,
             day TEXT NOT NULL, data TEXT NOT NULL, components TEXT NOT NULL DEFAULT '[]',
@@ -145,6 +147,19 @@ class Operations:
         shipment_columns = {row['name'] for row in self.db.execute('PRAGMA table_info(shipments)')}
         if 'erp_amount' not in shipment_columns:
             self.db.execute("ALTER TABLE shipments ADD COLUMN erp_amount TEXT")
+        for column in ('erp_code','erp_name','erp_warehouse'):
+            if column not in shipment_columns:
+                self.db.execute(f"ALTER TABLE shipments ADD COLUMN {column} TEXT")
+        if 'amount_split_confirmed' not in shipment_columns:
+            self.db.execute("ALTER TABLE shipments ADD COLUMN amount_split_confirmed INTEGER NOT NULL DEFAULT 1")
+            for row in self.db.execute('''SELECT s.id,r.order_id FROM shipments s
+                JOIN request_lines r ON s.line_id=r.id WHERE s.erp_id IS NULL''').fetchall():
+                component_count=self.db.execute(
+                    'SELECT COUNT(*) FROM request_lines WHERE order_id=?',(row['order_id'],)
+                ).fetchone()[0]
+                if component_count > 1:
+                    self.db.execute('UPDATE shipments SET amount_split_confirmed=0 WHERE id=?',(row['id'],))
+        self.db.commit()
 
     def close(self):
         self.db.close()
@@ -895,10 +910,13 @@ class Operations:
         full = number(component['amount'])
         cumulative = lambda value: (full*Decimal(value)/Decimal(component['quantity'])).quantize(Decimal('1'),rounding=ROUND_HALF_UP)
         suggested_amount = cumulative(done+q)-cumulative(done)
-        self.db.execute(
-            'INSERT INTO shipments(id,line_id,qty,tracking,day,erp_id,erp_amount) VALUES(?,?,?,?,?,NULL,?)',
-            (uuid.uuid4().hex,line['id'],q,tracking,shipped_on,str(suggested_amount)),
-        )
+        component_count=len(json.loads(order_row['components']))
+        self.db.execute('''INSERT INTO shipments(
+            id,line_id,qty,tracking,day,erp_id,erp_amount,amount_split_confirmed
+        ) VALUES(?,?,?,?,?,NULL,?,?)''',(
+            uuid.uuid4().hex,line['id'],q,tracking,shipped_on,str(suggested_amount),
+            0 if component_count > 1 else 1,
+        ))
         totals = self.db.execute('SELECT SUM(qty) FROM request_lines WHERE order_id=?', (line['order_id'],)).fetchone()[0]
         shipped = self.db.execute(
             'SELECT COALESCE(SUM(s.qty),0) FROM shipments s JOIN request_lines r ON s.line_id=r.id WHERE r.order_id=?',
@@ -1273,12 +1291,12 @@ class Operations:
             order = orders[row['order_id']]
             if self.smartstore_erp_enabled() and is_smartstore_channel(order['data'].get('channel')):
                 continue
-            component = order['components'][row['component']]
+            component = self._shipment_component(row,order)
             entries.append({'source':'일반 실제출고','id':row['id'],'day':row['day'],
                 'channel':order['data']['channel'],'order_no':order['data']['order_no'],
                 'recipient':order['data']['recipient'],'product':component.get('name') or component.get('code',''),
                 'code':component.get('code',''),'quantity':row['qty'],'amount':row['erp_amount'] or '',
-                'tracking':row['tracking'],'issue':'','erp_id':row['erp_id']})
+                'warehouse':component.get('warehouse',''),'tracking':row['tracking'],'issue':'','erp_id':row['erp_id']})
         query = 'SELECT * FROM smartstore_erp_rows'
         parameters = []
         if selected_day:
@@ -1289,14 +1307,72 @@ class Operations:
                 entries.append({'source':'스마트스토어 ERP','id':f"SSERP:{row['id']}:0",'day':row['day'],
                     'channel':'스마트스토어','order_no':data.get('order_no',''),'recipient':data.get('recipient',''),
                     'product':data.get('product',''),'code':'','quantity':data.get('quantity',''),
-                    'amount':'','tracking':'','issue':row['issue'],'erp_id':row['erp_id']})
+                    'amount':'','warehouse':'','tracking':'','issue':row['issue'],'erp_id':row['erp_id']})
             for index,component in enumerate(components):
                 entries.append({'source':'스마트스토어 ERP','id':f"SSERP:{row['id']}:{index}",'day':row['day'],
                     'channel':'스마트스토어','order_no':data.get('order_no',''),'recipient':data.get('recipient',''),
                     'product':component.get('name') or component.get('code',''),'code':component.get('code',''),
                     'quantity':component.get('quantity',data.get('quantity','')),'amount':component.get('amount',''),
-                    'tracking':'','issue':row['issue'],'erp_id':row['erp_id']})
+                    'warehouse':component.get('warehouse',''),'tracking':'','issue':row['issue'],'erp_id':row['erp_id']})
         return entries
+
+    def _shipment_component(self, shipment, order):
+        """Return the export-only component without changing the saved product mapping."""
+        component=dict(order['components'][shipment['component']])
+        if shipment['erp_code']:
+            component['code']=shipment['erp_code']
+        if shipment['erp_name']:
+            component['name']=shipment['erp_name']
+        if shipment['erp_warehouse']:
+            component['warehouse']=shipment['erp_warehouse']
+        return component
+
+    def set_erp_entry_output(self, entry_id, *, code=None, name=None, warehouse=None):
+        """Apply an override only to the selected actual-shipment Excel output row."""
+        if str(entry_id).startswith('SSERP:'):
+            _,row_id,index_text=str(entry_id).split(':',2)
+            with self.db:
+                row=self.db.execute('SELECT components,erp_id FROM smartstore_erp_rows WHERE id=?',(row_id,)).fetchone()
+                if not row:
+                    raise ValueError('스마트스토어 출고 내역을 찾지 못했습니다.')
+                if row['erp_id']:
+                    raise ValueError('이미 ERP 파일에 반영된 출고 건은 변경할 수 없습니다.')
+                components=json.loads(row['components']);index=int(index_text)
+                if not (0 <= index < len(components)):
+                    raise ValueError('품목 매칭이 완료된 행을 선택하세요.')
+                component=components[index]
+                if code is not None:
+                    component['code']=identifier(code)
+                if name is not None:
+                    component['name']=identifier(name)
+                if warehouse is not None:
+                    component['warehouse']=warehouse_code(warehouse)
+                if not component.get('code') or not component.get('name'):
+                    raise ValueError('ERP 품목코드와 품목명을 모두 입력하세요.')
+                self.db.execute('UPDATE smartstore_erp_rows SET components=? WHERE id=?',(encode(components),row_id))
+                self.event('출고 Excel 출력값 변경',str(entry_id))
+            return
+        with self.db:
+            row=self.db.execute('SELECT erp_id FROM shipments WHERE id=?',(entry_id,)).fetchone()
+            if not row:
+                raise ValueError('실제 출고 내역을 찾지 못했습니다.')
+            if row['erp_id']:
+                raise ValueError('이미 ERP 파일에 반영된 출고 건은 변경할 수 없습니다.')
+            updates=[];values=[]
+            if code is not None:
+                value=identifier(code)
+                if not value:raise ValueError('ERP 품목코드를 입력하세요.')
+                updates.append('erp_code=?');values.append(value)
+            if name is not None:
+                value=identifier(name)
+                if not value:raise ValueError('품목명을 입력하세요.')
+                updates.append('erp_name=?');values.append(value)
+            if warehouse is not None:
+                updates.append('erp_warehouse=?');values.append(warehouse_code(warehouse))
+            if not updates:return
+            values.append(entry_id)
+            self.db.execute(f"UPDATE shipments SET {','.join(updates)} WHERE id=?",values)
+            self.event('출고 Excel 출력값 변경',str(entry_id))
 
     def pending_erp_shipments(self, on=None):
         """Return actual shipments waiting for ERP, including their editable ERP amount."""
@@ -1315,17 +1391,98 @@ class Operations:
             data = order['data']
             if self.smartstore_erp_enabled() and is_smartstore_channel(data.get('channel')):
                 continue
-            component = order['components'][row['component']]
+            component = self._shipment_component(row,order)
             result.append({
                 'id':row['id'], 'day':row['day'], 'order_no':data['order_no'],
                 'recipient':data['recipient'], 'product':component.get('name') or component.get('code',''),
                 'code':component.get('code',''), 'quantity':row['qty'],
-                'amount':row['erp_amount'] or '', 'tracking':row['tracking'], 'source':'일반 실제출고',
+                'amount':row['erp_amount'] or '', 'warehouse':component.get('warehouse',''),
+                'tracking':row['tracking'], 'source':'일반 실제출고',
             })
         return result
 
     def pending_erp_entries(self, on=None):
         return [entry for entry in self.confirmed_erp_entries(on) if not entry.get('erp_id')]
+
+    def pending_amount_splits(self, on=None):
+        """Return one row per multi-component order/day still awaiting amount confirmation."""
+        conditions=['s.erp_id IS NULL','s.amount_split_confirmed=0']
+        parameters=[]
+        if on:
+            conditions.append('s.day=?');parameters.append(day(on))
+        rows=self.db.execute(f'''SELECT s.*,r.order_id,r.component FROM shipments s
+            JOIN request_lines r ON s.line_id=r.id
+            WHERE {' AND '.join(conditions)} ORDER BY s.day,s.rowid''',parameters).fetchall()
+        orders={order['id']:order for order in self.orders()}
+        groups={}
+        for row in rows:
+            order=orders.get(row['order_id'])
+            if not order or len(order['components']) < 2:
+                continue
+            if self.smartstore_erp_enabled() and is_smartstore_channel(order['data'].get('channel')):
+                continue
+            key=(row['order_id'],row['day'])
+            groups.setdefault(key,[]).append(row)
+        result=[]
+        for (order_id,shipping_day),shipments in groups.items():
+            order=orders[order_id];components=[]
+            for index,definition in enumerate(order['components']):
+                component_rows=[row for row in shipments if row['component']==index]
+                if not component_rows:
+                    continue
+                effective=self._shipment_component(component_rows[0],order)
+                components.append({
+                    'index':index,'code':effective.get('code',''),
+                    'name':effective.get('name') or effective.get('code',''),
+                    'quantity':sum(row['qty'] for row in component_rows),
+                    'amount':str(sum(number(row['erp_amount'] or '0') for row in component_rows)),
+                })
+            if len(components) < 2:
+                continue
+            total=sum(number(component['amount']) for component in components)
+            result.append({
+                'id':f'{order_id}|{shipping_day}','order_id':order_id,'day':shipping_day,
+                'order_no':order['data']['order_no'],'recipient':order['data']['recipient'],
+                'components':components,'component_count':len(components),'total':str(total),
+                'summary':' / '.join(f"{item['name']} {item['amount']}원" for item in components),
+            })
+        return result
+
+    def set_amount_split(self, order_id, shipping_day, allocations):
+        shipping_day=day(shipping_day)
+        order=next((item for item in self.orders() if item['id']==order_id),None)
+        if not order or len(order['components']) < 2:
+            raise ValueError('구성품이 2개 이상인 주문을 선택하세요.')
+        rows=self.db.execute('''SELECT s.*,r.component FROM shipments s
+            JOIN request_lines r ON s.line_id=r.id
+            WHERE r.order_id=? AND s.day=? AND s.erp_id IS NULL ORDER BY r.component,s.rowid''',
+            (order_id,shipping_day)).fetchall()
+        if not rows:
+            raise ValueError('금액을 나눌 미반영 출고 건을 찾지 못했습니다.')
+        values={int(index):number(value) for index,value in allocations.items()}
+        expected=sum(number(row['erp_amount'] or '0') for row in rows)
+        if sum(values.values()) != expected:
+            raise ValueError(f'구성품 금액 합계는 주문 금액 {int(expected):,}원과 같아야 합니다.')
+        component_indexes={row['component'] for row in rows}
+        if set(values) != component_indexes:
+            raise ValueError('모든 출고 구성품의 금액을 입력하세요.')
+        if any(value != value.to_integral_value() for value in values.values()):
+            raise ValueError('구성품 금액은 원 단위 정수로 입력하세요.')
+        with self.db:
+            for index in component_indexes:
+                component_rows=[row for row in rows if row['component']==index]
+                total_quantity=sum(row['qty'] for row in component_rows)
+                allocated=Decimal('0')
+                cumulative_quantity=0
+                for position,row in enumerate(component_rows):
+                    cumulative_quantity+=row['qty']
+                    cumulative=(values[index]*Decimal(cumulative_quantity)/Decimal(total_quantity)).quantize(
+                        Decimal('1'),rounding=ROUND_HALF_UP,
+                    )
+                    amount=cumulative-allocated;allocated=cumulative
+                    self.db.execute('''UPDATE shipments SET erp_amount=?,amount_split_confirmed=1
+                        WHERE id=?''',(str(amount),row['id']))
+            self.event('구성품별 금액 분리',f'{order_id}: {shipping_day}')
 
     def set_erp_amount(self, shipment_id, amount):
         value = number(amount)
@@ -1463,6 +1620,10 @@ class Operations:
         unmatched = [shipment for shipment in pending if shipment['erp_amount'] in (None,'')]
         if unmatched:
             raise ValueError(f'ERP 금액 매칭이 필요한 실제 출고가 {len(unmatched):,}건 있습니다.')
+        unconfirmed = [shipment for shipment in pending if not shipment['amount_split_confirmed']]
+        if unconfirmed:
+            order_count=len({shipment['order_id'] for shipment in unconfirmed})
+            raise ValueError(f'구성품별 금액 분리가 필요한 주문이 {order_count:,}건 있습니다.')
         smart_unmatched=[]
         for row in smart_rows:
             components=json.loads(row['components'])
@@ -1489,7 +1650,7 @@ class Operations:
         with self.db:
             for shipment in pending:
                 order = orders[shipment['order_id']]
-                c = order['components'][shipment['component']]
+                c = self._shipment_component(shipment,order)
                 append(c, shipment['qty'], number(shipment['erp_amount']))
                 self.db.execute('UPDATE shipments SET erp_id=? WHERE id=?', (batch,shipment['id']))
             for smart_row in smart_rows:
@@ -1588,7 +1749,7 @@ class Operations:
             for shipment in shipments:
                 order=orders.get(shipment['order_id'])
                 if order:
-                    component=order['components'][shipment['component']]
+                    component=self._shipment_component(shipment,order)
                     add(artifact,'일반 ERP',shipment['day'],order['data'],shipment['qty'],shipment['erp_amount'],
                         shipment['id'],shipment['tracking'],warehouse_code(component.get('warehouse','')))
             for table,source in (('smartstore_erp_rows','스마트스토어 ERP'),('esm_erp_rows','ESM ERP')):

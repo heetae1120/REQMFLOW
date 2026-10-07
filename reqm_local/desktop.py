@@ -37,7 +37,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.10'
+APP_VERSION = '1.9.11'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -333,35 +333,29 @@ class Desktop:
         result_tabs.add(esm_frame,text='2-1  옥션/지마켓 ERP전환')
         result_tabs.add(erp_frame,text='3  ERP 파일 생성 및 다운로드')
         ttk.Label(result_input,text='당일 출고건 확인',font=(self.font_family,18,'bold')).pack(anchor='w')
-        ttk.Label(result_input,text='당일 생성한 출고요청은 자동으로 불러오거나, 위킵 반환 파일로 직접 반영할 수 있습니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
+        ttk.Label(result_input,text='선택한 날짜의 출고건을 불러온 뒤, 이번 ERP Excel에 적용할 창고와 품목만 변경할 수 있습니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
         result_card = ttk.LabelFrame(result_input,text='입력 파일',padding=18)
         result_card.pack(fill='x')
-        ttk.Label(result_card,text='입력 구분',foreground='#64748B').grid(row=0,column=0,sticky='w')
-        ttk.Label(result_card,text='일반 판매처: 당일 출고요청 자동 반영 또는 위킵 출고파일 · 스마트스토어: ERP 입력 원본',font=(self.font_family,10,'bold')).grid(row=1,column=0,sticky='w',pady=(2,14))
-        ttk.Label(result_card,text='자동·파일 반영 모두 스마트스토어를 제외합니다. 위킵 반환 파일은 송장번호를 채운 출고요청 양식을 사용합니다.',foreground='#64748B').grid(row=2,column=0,sticky='w')
-        result_actions = ttk.Frame(result_card);result_actions.grid(row=0,column=1,rowspan=3,sticky='e',padx=(40,0))
-        self.button(result_actions,'위킵 출고양식 저장',self.result_template,style='Quiet.TButton')
-        self.button(result_actions,'당일 출고건 자동 불러오기',self.auto_results,style='Accent.TButton')
-        ttk.Button(result_actions,textvariable=self.erp_exclusion_text,command=lambda:self.safe(lambda:self.choose_channel_exclusions('erp'))).pack(side='left',padx=4)
-        self.button(result_actions,'일반 실제출고 입력',self.results,style='Accent.TButton')
+        ttk.Label(result_card,text='일반 판매처는 출고요청 기준으로 불러오며, 스마트스토어는 전용 파일을 입력합니다.',foreground='#64748B').pack(anchor='w',pady=(0,12))
+        result_actions = ttk.Frame(result_card);result_actions.pack(fill='x')
+        self.button(result_actions,'당일 출고건 불러오기',self.auto_results,style='Accent.TButton')
+        self.button(result_actions,'출하 창고 변경',self.change_shipment_warehouse,style='Quiet.TButton')
+        self.button(result_actions,'품목 변경',self.change_shipment_item,style='Quiet.TButton')
         self.button(result_actions,'스마트스토어 출고파일',self.smartstore_erp_results,style='Accent.TButton')
         self.button(result_actions,'구매확정파일 입력',self.smartstore_purchase_results,style='Accent.TButton')
-        result_card.columnconfigure(0,weight=1)
         confirmed_line=ttk.Frame(result_input);confirmed_line.pack(fill='x',pady=(12,8))
         ttk.Label(confirmed_line,text='출고일').pack(side='left')
-        ttk.Entry(confirmed_line,textvariable=self.erp_ship_day,width=12).pack(side='left',padx=6)
-        self.button(confirmed_line,'출고건 조회',self.refresh_confirmed_shipments,style='Quiet.TButton')
-        self.confirmed_shipments = self.tree(result_input,['구분','출고일','판매처','주문번호','이름','품목','수량','송장번호'],[130,105,140,160,100,260,70,150])
+        self.date_picker(confirmed_line,self.erp_ship_day,'실제 출고일 선택').pack(side='left',padx=6)
+        self.confirmed_shipments = self.tree(result_input,['구분','출고일','판매처','주문번호','이름','ERP 품목코드','ERP 품목명','출하창고','수량','송장번호'],[125,105,130,150,100,155,240,95,65,140])
         ttk.Label(amount_frame,text='금액 매칭 및 세트 분리',font=(self.font_family,18,'bold')).pack(anchor='w')
-        ttk.Label(amount_frame,text='출고 확인된 품목의 ERP 금액을 확인하고, 스마트스토어 세트 구성은 필요할 때 수정합니다.',foreground='#64748B').pack(anchor='w',pady=(4,16))
+        ttk.Label(amount_frame,text='주문·출고요청에서 구성품을 2개 이상 매칭한 주문 중 금액 분리가 필요한 건만 표시합니다.',foreground='#64748B').pack(anchor='w',pady=(4,16))
         amount_line = ttk.Frame(amount_frame); amount_line.pack(fill='x',pady=(0,10))
         ttk.Label(amount_line,text='실제 출고일').pack(side='left')
-        ttk.Entry(amount_line,textvariable=self.erp_ship_day,width=12).pack(side='left',padx=6)
-        self.button(amount_line,'조회',self.refresh_erp_shipments)
-        self.button(amount_line,'선택 금액 매칭',self.match_erp_amount,style='Accent.TButton')
-        self.button(amount_line,'선택 세트 구성',self.edit_erp_set,style='Quiet.TButton')
-        self.erp_shipments = self.tree(amount_frame,['구분','실제 출고일','주문번호','이름','ERP 품목코드','ERP 품목명','출고수량','ERP 반영금액'],[125,110,150,110,150,250,80,120])
-        self.erp_shipments.bind('<Double-1>',lambda _event:self.safe(self.match_erp_amount))
+        self.date_picker(amount_line,self.erp_ship_day,'실제 출고일 선택').pack(side='left',padx=6)
+        self.button(amount_line,'선택 주문 금액 나누기',self.split_order_amount,style='Accent.TButton')
+        self.erp_shipments = self.tree(amount_frame,['실제 출고일','주문번호','이름','구성품 수','주문 금액','현재 구성품별 금액'],[110,160,110,85,120,620])
+        self.erp_shipments.bind('<Double-1>',lambda _event:self.safe(self.split_order_amount))
+        self.erp_ship_day.trace_add('write',lambda *_:self.refresh_actual_erp_day())
         self.esm_start_day = tk.StringVar(value=date.today().isoformat())
         self.esm_end_day = tk.StringVar(value=date.today().isoformat())
         self.esm_user_id = tk.StringVar()
@@ -1958,24 +1952,93 @@ class Desktop:
         if not hasattr(self,'confirmed_shipments'):
             return
         self.confirmed_shipments.delete(*self.confirmed_shipments.get_children())
-        for entry in self.service.confirmed_erp_entries(self.erp_ship_day.get()):
-            self.confirmed_shipments.insert('', 'end', iid='confirmed-'+entry['id'], values=[
+        self.confirmed_entry_ids={}
+        for index,entry in enumerate(self.service.confirmed_erp_entries(self.erp_ship_day.get())):
+            item_id=f'confirmed-{index}';self.confirmed_entry_ids[item_id]=entry['id']
+            self.confirmed_shipments.insert('', 'end', iid=item_id, values=[
                 entry['source'],entry['day'],INTERNAL_TO_CHANNEL.get(entry['channel'],entry['channel']),
-                entry['order_no'],entry['recipient'],entry['product'],entry['quantity'],entry['tracking'] or '—',
+                entry['order_no'],entry['recipient'],entry['code'],entry['product'],entry.get('warehouse',''),
+                entry['quantity'],entry['tracking'] or '—',
             ])
         self.root.after_idle(lambda:autosize_tree(self.confirmed_shipments,maximum=300))
+
+    def refresh_actual_erp_day(self):
+        self.refresh_confirmed_shipments()
+        self.refresh_erp_shipments()
+
+    def selected_confirmed_entry(self):
+        item_id=self.selected(self.confirmed_shipments)[0]
+        entry_id=self.confirmed_entry_ids[item_id]
+        return next(entry for entry in self.service.confirmed_erp_entries(self.erp_ship_day.get()) if entry['id']==entry_id)
+
+    def change_shipment_warehouse(self):
+        entry=self.selected_confirmed_entry()
+        value=simpledialog.askstring(
+            '출하 창고 변경',
+            f"주문번호: {entry['order_no']}\n품목: {entry['product']}\n\n100 본사창고 또는 300 위킵창고를 입력하세요.\n이 변경은 이번 ERP Excel에만 적용됩니다.",
+            initialvalue=entry.get('warehouse',''),parent=self.root,
+        )
+        if value is None:return
+        self.service.set_erp_entry_output(entry['id'],warehouse=value)
+        self.refresh_actual_erp_day()
+
+    def change_shipment_item(self):
+        entry=self.selected_confirmed_entry()
+        code=simpledialog.askstring(
+            '품목 변경 · ERP 품목코드',
+            f"주문번호: {entry['order_no']}\n현재 품목: {entry['product']}\n\n이번 ERP Excel에 사용할 품목코드를 입력하세요.",
+            initialvalue=entry.get('code',''),parent=self.root,
+        )
+        if code is None:return
+        name=simpledialog.askstring(
+            '품목 변경 · 품목명',
+            '이번 ERP Excel에 표시할 품목명을 입력하세요.\n저장된 상품 매칭에는 영향을 주지 않습니다.',
+            initialvalue=entry.get('product',''),parent=self.root,
+        )
+        if name is None:return
+        self.service.set_erp_entry_output(entry['id'],code=code,name=name)
+        self.refresh_actual_erp_day()
 
     def refresh_erp_shipments(self):
         if not hasattr(self,'erp_shipments'):
             return
         self.erp_shipments.delete(*self.erp_shipments.get_children())
-        for shipment in self.service.pending_erp_entries(self.erp_ship_day.get()):
-            self.erp_shipments.insert('', 'end', iid=shipment['id'], values=[
-                shipment['source'],shipment['day'],shipment['order_no'],shipment['recipient'],shipment['code'],shipment['product'],
-                shipment['quantity'],f"{int(Decimal(shipment['amount'])):,}" if shipment['amount'] else '미매칭',
-            ],tags=('review',) if shipment.get('issue') else ())
-        self.erp_shipments.tag_configure('review',foreground='#BE123C',background='#FFF1F2')
+        self.amount_split_rows={}
+        for index,row in enumerate(self.service.pending_amount_splits(self.erp_ship_day.get())):
+            item_id=f'amount-split-{index}';self.amount_split_rows[item_id]=row
+            self.erp_shipments.insert('', 'end', iid=item_id, values=[
+                row['day'],row['order_no'],row['recipient'],row['component_count'],
+                f"{int(Decimal(row['total'])):,}",row['summary'],
+            ])
         self.root.after_idle(lambda:autosize_tree(self.erp_shipments,maximum=320))
+
+    def split_order_amount(self):
+        item_id=self.selected(self.erp_shipments)[0]
+        row=self.amount_split_rows[item_id]
+        win=tk.Toplevel(self.root);win.title('구성품별 금액 나누기');win.geometry('900x520');win.transient(self.root);win.grab_set()
+        ttk.Label(win,text='구성품별 금액 나누기',font=(self.font_family,17,'bold'),padding=(18,16)).pack(anchor='w')
+        ttk.Label(win,text=f"주문번호 {row['order_no']} · {row['recipient']} · 주문 금액 {int(Decimal(row['total'])):,}원",padding=(18,0)).pack(anchor='w')
+        ttk.Label(win,text='각 구성품의 총 반영금액을 입력하세요. 합계가 주문 금액과 같아야 저장됩니다.',foreground='#64748B',padding=(18,7)).pack(anchor='w')
+        grid=ttk.Frame(win,padding=18);grid.pack(fill='both',expand=True)
+        for column,label in enumerate(('ERP 품목코드','ERP 품목명','출고수량','반영금액')):
+            ttk.Label(grid,text=label,font=(self.font_family,10,'bold')).grid(row=0,column=column,sticky='w',padx=5,pady=6)
+        amounts={}
+        for position,component in enumerate(row['components'],start=1):
+            ttk.Label(grid,text=component['code']).grid(row=position,column=0,sticky='w',padx=5,pady=6)
+            ttk.Label(grid,text=component['name']).grid(row=position,column=1,sticky='w',padx=5,pady=6)
+            ttk.Label(grid,text=str(component['quantity'])).grid(row=position,column=2,sticky='w',padx=5,pady=6)
+            variable=tk.StringVar(value=str(int(Decimal(component['amount']))));amounts[component['index']]=variable
+            ttk.Entry(grid,textvariable=variable,width=18).grid(row=position,column=3,sticky='w',padx=5,pady=6)
+        grid.columnconfigure(1,weight=1)
+        def save():
+            self.service.set_amount_split(
+                row['order_id'],row['day'],
+                {index:variable.get().replace(',','') for index,variable in amounts.items()},
+            )
+            win.destroy();self.refresh_erp_shipments();self.refresh_confirmed_shipments()
+        actions=ttk.Frame(win,padding=18);actions.pack(fill='x')
+        self.button(actions,'저장',save,style='Accent.TButton')
+        self.button(actions,'취소',win.destroy,style='Quiet.TButton')
 
     def match_erp_amount(self):
         shipment_id=self.selected(self.erp_shipments)[0]

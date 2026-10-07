@@ -37,8 +37,12 @@ def run(folder):
         assert root.title().startswith('REQM FLOW')
         assert app.font_family == 'Pretendard'
         assert app.matching_sites.get(1) == '스마트스토어 ERP매칭'
-        assert tuple(app.confirmed_shipments['columns']) == ('구분','출고일','판매처','주문번호','이름','품목','수량','송장번호')
-        assert tuple(app.erp_shipments['columns'])[:2] == ('구분','실제 출고일')
+        assert tuple(app.confirmed_shipments['columns']) == (
+            '구분','출고일','판매처','주문번호','이름','ERP 품목코드','ERP 품목명','출하창고','수량','송장번호',
+        )
+        assert tuple(app.erp_shipments['columns']) == (
+            '실제 출고일','주문번호','이름','구성품 수','주문 금액','현재 구성품별 금액',
+        )
         assert len(app.table.get_children())==1
         app.table.selection_set(row['id']);app.show_detail()
         assert len(app.history.get_children())==2

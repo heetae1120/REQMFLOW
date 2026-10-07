@@ -35,7 +35,13 @@ with tempfile.TemporaryDirectory(dir=root/'outputs') as folder:
         assert app.erp_include_esm.get() is True
         assert tuple(app.history['columns']) == (
             '출력일(요일)','출고일','종류','판매처','주문번호','수령인','연락처',
-            '판매품목','옵션','수량','금액','등록','묶음 ID',
+            '판매품목','옵션','수량','금액','송장번호','출하창고','비고','등록','묶음 ID',
+        )
+        assert tuple(app.confirmed_shipments['columns']) == (
+            '구분','출고일','판매처','주문번호','이름','ERP 품목코드','ERP 품목명','출하창고','수량','송장번호',
+        )
+        assert tuple(app.erp_shipments['columns']) == (
+            '실제 출고일','주문번호','이름','구성품 수','주문 금액','현재 구성품별 금액',
         )
         zigzag_headers=['']*47
         for index,label in {
