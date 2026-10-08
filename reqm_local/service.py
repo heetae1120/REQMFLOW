@@ -24,6 +24,7 @@ from .files import (
 )
 from .esm import parse_esm_rows
 from .profiles import SMARTSTORE_PURCHASE_CHANNEL
+from .tracking_store import TrackingOperations
 
 
 SMARTSTORE_CHANNEL = '리큐엠_스마트스토어'
@@ -93,7 +94,7 @@ def warehouse_code(value):
     raise ValueError('출하창고는 100 본사창고 또는 300 위킵창고만 사용할 수 있습니다.')
 
 
-class Operations:
+class Operations(TrackingOperations):
     """All mutations are transactional. No GUI, network, or user session dependencies."""
 
     def __init__(self, folder, reference_dir):
@@ -140,6 +141,7 @@ class Operations:
             note TEXT NOT NULL DEFAULT '', PRIMARY KEY(artifact_id,row_key));
         CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, at TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL);
         ''')
+        self.initialize_tracking()
         event_columns = {row['name'] for row in self.db.execute('PRAGMA table_info(event_rules)')}
         if 'components' not in event_columns:
             self.db.execute("ALTER TABLE event_rules ADD COLUMN components TEXT NOT NULL DEFAULT '[]'")
@@ -544,6 +546,7 @@ class Operations:
             data=json.loads(row['data'])
             tracking=self._tracking_text(value[0] for value in self.db.execute('''SELECT s.tracking FROM shipments s
                 JOIN request_lines r ON s.line_id=r.id WHERE r.order_id=? ORDER BY s.rowid''',(order_id,)))
+            tracking=tracking or data.get('_wekeep_tracking','')
             data['tracking']=tracking
             self.db.execute('UPDATE orders SET data=? WHERE id=?',(encode(data),order_id))
             if data.get('source_file') and tracking:

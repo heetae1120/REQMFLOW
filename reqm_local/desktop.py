@@ -37,7 +37,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.19'
+APP_VERSION = '1.9.21'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -336,6 +336,10 @@ class Desktop:
         result_tabs.add(amount_frame,text='2  금액 매칭 및 세트 분리')
         result_tabs.add(esm_frame,text='2-1  옥션/지마켓 ERP전환')
         result_tabs.add(erp_frame,text='3  ERP 파일 생성 및 다운로드')
+        tracking_frame = ttk.Frame(result_tabs,padding=20)
+        result_tabs.add(tracking_frame,text='4  위킵 송장 가져오기')
+        from .tracking_ui import TrackingPanel
+        self.tracking_panel = TrackingPanel(self,tracking_frame)
         ttk.Label(result_input,text='당일 출고건 확인',font=(self.font_family,18,'bold')).pack(anchor='w')
         ttk.Label(result_input,text='당일 생성한 출고요청은 자동으로 불러오거나, 위킵 반환 파일로 직접 반영할 수 있습니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
         result_card = ttk.LabelFrame(result_input,text='입력 파일',padding=18)
@@ -1287,6 +1291,7 @@ class Desktop:
         self.refresh_orders()
 
     def refresh(self):
+        if hasattr(self,'tracking_panel'):self.tracking_panel.refresh()
         self.refresh_orders()
         self.refresh_erp_shipments()
         self.refresh_confirmed_shipments()

@@ -234,7 +234,7 @@ class LocalTests(unittest.TestCase):
         before = export_workspace(self.s)
         for change in ('schema', 'table', 'column'):
             state = json.loads(json.dumps(before))
-            if change == 'schema': state['schema_version'] = 8
+            if change == 'schema': state['schema_version'] = 9
             elif change == 'table': state['tables']['future_table'] = []
             else: state['tables']['orders'][0]['future_column'] = 'test'
             with self.assertRaises(RuntimeError): import_workspace(self.s, state)

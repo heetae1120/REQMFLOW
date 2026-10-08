@@ -8,11 +8,12 @@ from pathlib import Path
 
 
 WORKSPACE_KEY = "default"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 TABLE_ORDER = (
     "orders", "mappings", "item_names", "event_rules", "requests", "request_lines",
     "shipments", "smartstore_erp_rows", "smartstore_purchase_rows", "esm_erp_rows",
     "fees", "artifacts", "source_files", "artifact_notes", "events",
+    "tracking_jobs", "tracking_rows", "tracking_queries",
 )
 DELETE_ORDER = tuple(reversed(TABLE_ORDER))
 
