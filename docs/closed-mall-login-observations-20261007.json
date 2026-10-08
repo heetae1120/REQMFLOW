@@ -1,0 +1,84 @@
+{
+  "started_at": "2026-10-07T08:33:22Z",
+  "tested_at": "2026-10-07T08:42:00.032Z",
+  "excluded": [
+    "이알아이",
+    "삼성카드복지몰",
+    "한섬"
+  ],
+  "results": [
+    {
+      "channel": "shop by",
+      "status": "성공",
+      "reason": "기존 로그인 유지(동시 로그인 허용) 선택 후 대시보드 진입",
+      "mode": "신규 로그인"
+    },
+    {
+      "channel": "이제너두 ETBS",
+      "status": "성공",
+      "reason": "파트너 관리자 홈 진입",
+      "mode": "신규 로그인"
+    },
+    {
+      "channel": "컬리",
+      "status": "성공",
+      "reason": "파트너 오피스 홈 진입; 이번 시도 추가 인증 없음",
+      "mode": "신규 로그인"
+    },
+    {
+      "channel": "삼몰",
+      "status": "성공",
+      "reason": "MakeShop 공급자시스템 진입",
+      "mode": "신규 로그인"
+    },
+    {
+      "channel": "현대홈쇼핑",
+      "status": "성공",
+      "reason": "리큐엠 파트너 시스템 진입; 이번 시도 이메일 인증 없음",
+      "mode": "신규 로그인"
+    },
+    {
+      "channel": "SSF SHOP",
+      "status": "성공",
+      "reason": "Google 메시지 새 SMS 인증번호 입력 후 파트너오피스 진입",
+      "mode": "신규 로그인 + SMS"
+    },
+    {
+      "channel": "핫트랙스",
+      "status": "성공",
+      "reason": "Google 메시지 새 SMS 인증번호 입력 후 관리자 홈 진입",
+      "mode": "신규 로그인 + SMS"
+    },
+    {
+      "channel": "W컨셉",
+      "status": "성공",
+      "reason": "SMS 발송·확인을 키보드 Enter로 처리해 PIN 대시보드 진입",
+      "mode": "신규 로그인 + SMS"
+    },
+    {
+      "channel": "베네피아",
+      "status": "성공",
+      "reason": "REQM 이메일 인증 후 몰어드민 진입",
+      "mode": "신규 로그인 + 이메일"
+    },
+    {
+      "channel": "현대이지웰",
+      "status": "성공",
+      "reason": "ORORA 이메일 인증 후 유저정보에서 복지샵(10064255) 선택 및 홈 재진입",
+      "mode": "신규 로그인 + 이메일 + 채널 전환"
+    },
+    {
+      "channel": "29CM",
+      "status": "성공",
+      "reason": "REQM 이메일 인증 후 29Connect 대시보드 진입",
+      "mode": "신규 로그인 + 이메일"
+    },
+    {
+      "channel": "무신사",
+      "status": "성공",
+      "reason": "REQM 이메일 인증 후 파트너 대시보드 진입. 첫 시도 리프레시 토큰 만료 후 단독 재시도 성공",
+      "mode": "신규 로그인 + 이메일"
+    }
+  ],
+  "scope": "로그인 및 이지웰 복지샵 채널 전환; 주문 수집/다운로드 미실행"
+}

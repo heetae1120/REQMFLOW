@@ -1,7 +1,7 @@
 # Build: pyinstaller --noconfirm REQM_local.spec
 from pathlib import Path
 import sys
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 # The repository also contains a top-level ``supabase`` data directory. Put the
 # installed dependencies first so PyInstaller resolves the Supabase Python SDK
@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path('.builddeps').resolve()))
 
 datas=[('supabase/ecount_migration/data','reference_data'),('assets/fonts','assets/fonts'),('assets/branding','assets/branding')]
 selenium_hiddenimports=collect_submodules('selenium')
+datas += collect_data_files('selenium')
 if Path('config.json').exists():
     datas.append(('config.json','.'))
 a = Analysis(['reqm_local_app.py'], pathex=[],

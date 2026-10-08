@@ -24,6 +24,7 @@ from .files import (
 )
 from .esm import parse_esm_rows
 from .profiles import SMARTSTORE_PURCHASE_CHANNEL
+from .tracking_store import TrackingOperations
 
 
 SMARTSTORE_CHANNEL = '리큐엠_스마트스토어'
@@ -93,7 +94,7 @@ def warehouse_code(value):
     raise ValueError('출하창고는 100 본사창고 또는 300 위킵창고만 사용할 수 있습니다.')
 
 
-class Operations:
+class Operations(TrackingOperations):
     """All mutations are transactional. No GUI, network, or user session dependencies."""
 
     def __init__(self, folder, reference_dir):
@@ -110,9 +111,7 @@ class Operations:
         CREATE TABLE IF NOT EXISTS orders(id TEXT PRIMARY KEY, identity TEXT UNIQUE NOT NULL, data TEXT NOT NULL,
             components TEXT NOT NULL DEFAULT '[]', state TEXT NOT NULL, issue TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS mappings(key TEXT PRIMARY KEY, components TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS item_names(
-            erp_item_code TEXT PRIMARY KEY, matching_name TEXT NOT NULL
-        );
+        CREATE TABLE IF NOT EXISTS item_names(erp_item_code TEXT PRIMARY KEY, matching_name TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS event_rules(id TEXT PRIMARY KEY, channel TEXT NOT NULL, name TEXT NOT NULL,
             source_product TEXT NOT NULL, source_option TEXT NOT NULL, target_product TEXT NOT NULL,
             target_option TEXT NOT NULL, target_amount TEXT NOT NULL, components TEXT NOT NULL DEFAULT '[]',
@@ -125,7 +124,7 @@ class Operations:
         CREATE TABLE IF NOT EXISTS shipments(id TEXT PRIMARY KEY, line_id TEXT REFERENCES request_lines(id),
             qty INTEGER NOT NULL, tracking TEXT NOT NULL, day TEXT NOT NULL, erp_id TEXT, erp_amount TEXT,
             erp_code TEXT, erp_name TEXT, erp_warehouse TEXT,
-            amount_split_confirmed INTEGER NOT NULL DEFAULT 1,
+            amount_split_confirmed INTEGER NOT NULL DEFAULT 0,
             UNIQUE(line_id,tracking,day));
         CREATE TABLE IF NOT EXISTS smartstore_erp_rows(id TEXT PRIMARY KEY, identity TEXT UNIQUE NOT NULL,
             day TEXT NOT NULL, data TEXT NOT NULL, components TEXT NOT NULL DEFAULT '[]',
@@ -144,6 +143,7 @@ class Operations:
             note TEXT NOT NULL DEFAULT '', PRIMARY KEY(artifact_id,row_key));
         CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, at TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL);
         ''')
+        self.initialize_tracking()
         event_columns = {row['name'] for row in self.db.execute('PRAGMA table_info(event_rules)')}
         if 'components' not in event_columns:
             self.db.execute("ALTER TABLE event_rules ADD COLUMN components TEXT NOT NULL DEFAULT '[]'")
@@ -154,14 +154,7 @@ class Operations:
             if column not in shipment_columns:
                 self.db.execute(f"ALTER TABLE shipments ADD COLUMN {column} TEXT")
         if 'amount_split_confirmed' not in shipment_columns:
-            self.db.execute("ALTER TABLE shipments ADD COLUMN amount_split_confirmed INTEGER NOT NULL DEFAULT 1")
-            for row in self.db.execute('''SELECT s.id,r.order_id FROM shipments s
-                JOIN request_lines r ON s.line_id=r.id WHERE s.erp_id IS NULL''').fetchall():
-                component_count=self.db.execute(
-                    'SELECT COUNT(*) FROM request_lines WHERE order_id=?',(row['order_id'],)
-                ).fetchone()[0]
-                if component_count > 1:
-                    self.db.execute('UPDATE shipments SET amount_split_confirmed=0 WHERE id=?',(row['id'],))
+            self.db.execute("ALTER TABLE shipments ADD COLUMN amount_split_confirmed INTEGER NOT NULL DEFAULT 0")
         self.seed_item_names()
         self.db.commit()
 
@@ -613,6 +606,7 @@ class Operations:
             data=json.loads(row['data'])
             tracking=self._tracking_text(value[0] for value in self.db.execute('''SELECT s.tracking FROM shipments s
                 JOIN request_lines r ON s.line_id=r.id WHERE r.order_id=? ORDER BY s.rowid''',(order_id,)))
+            tracking=tracking or data.get('_wekeep_tracking','')
             data['tracking']=tracking
             self.db.execute('UPDATE orders SET data=? WHERE id=?',(encode(data),order_id))
             if data.get('source_file') and tracking:

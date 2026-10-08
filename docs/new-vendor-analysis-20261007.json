@@ -1,0 +1,43 @@
+{
+  "analyzed_at": "2026-10-07",
+  "source": "1007_폐쇄몰_메일_계정_입력양식.xlsx",
+  "scope": "기존 등록 14개 및 작업자 인증 3개를 제외한 신규 판매처 로그인 화면 분석",
+  "contains_credentials": false,
+  "vendors": [
+    {
+      "key": "ably",
+      "name": "에이블리",
+      "source_row": 19,
+      "source_url": "https://my.a-bly.com",
+      "login_url": "https://my.a-bly.com/login",
+      "observed_url": "https://my.a-bly.com/login?redirect=%2F",
+      "page_title": "에이블리 - 내 마켓 관리 사이트",
+      "first_authentication": "이메일 형식 ID + 비밀번호",
+      "input_fields": {"user": "input[name=email]", "password": "input[name=password]"},
+      "submit_label": "로그인",
+      "additional_authentication": "미확인",
+      "mailbox": null,
+      "login_result": "미실행",
+      "automation_mode": "화면 확인",
+      "notes": ["셀러 전용 어드민", "로그인 성공·주문 메뉴·다운로드 방식은 후속 검증 필요"]
+    },
+    {
+      "key": "zigzag",
+      "name": "지그재그",
+      "source_row": 20,
+      "source_url": "https://partners.kakaostyle.com/shop/cq-mj6fbjgr/stats",
+      "login_url": "https://partners.kakaostyle.com/login",
+      "observed_url": "https://partners.kakaostyle.com/login?redirect_uri=%2Fshop%2Fcq-mj6fbjgr%2Fstats",
+      "post_login_target": "/shop/cq-mj6fbjgr/stats",
+      "page_title": "카카오스타일 - 파트너센터",
+      "first_authentication": "이메일 주소 + 비밀번호",
+      "input_fields": {"user": "input[placeholder='이메일 주소']", "password": "input[placeholder='비밀번호']"},
+      "submit_label": "로그인",
+      "additional_authentication": "미확인",
+      "mailbox": null,
+      "login_result": "미실행",
+      "automation_mode": "화면 확인",
+      "notes": ["카카오스타일 파트너센터 사용", "엑셀 URL은 특정 매장 통계 경로이며 주문 수집 페이지가 아님", "다른 매장 계정에는 이 매장 경로를 자동 적용하지 않음", "로그인 성공·주문 메뉴·다운로드 방식은 후속 검증 필요"]
+    }
+  ]
+}

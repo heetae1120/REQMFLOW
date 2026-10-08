@@ -27,7 +27,7 @@ from .ui_helpers import (
     autosize_tree, bind_desktop_drag, bind_tree_sorting, bind_wide_combobox, filter_combobox_choices,
     post_combobox, search_suggestions,
 )
-from .workspace_cloud import CloudWorkspace, WorkspaceConflict
+from .workspace_cloud import CloudWorkspace, WorkspaceConflict, WorkspaceFormatError
 from .profiles import (
     PROFILE_PRESETS, SALES_CHANNELS, MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING,
     SMARTSTORE_PURCHASE_MAPPING, SMARTSTORE_PURCHASE_CHANNEL,
@@ -37,7 +37,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.20'
+APP_VERSION = '1.9.22'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -222,9 +222,13 @@ class Desktop:
         result_frame = ttk.Frame(tabs,padding=16)
         history_frame = ttk.Frame(tabs,padding=12)
         settings_frame = ttk.Frame(tabs,padding=16)
+        login_frame = ttk.Frame(tabs,padding=16)
         for frame,title in [(matching_frame,'★  매칭 설정'),(self.order_frame,'1  주문 · 출고요청'),(result_frame,'2  실제 출고 · ERP'),(history_frame,'3  출력 이력'),(settings_frame,'4  설정 · 백업')]:
             tabs.add(frame,text=title)
-        nav_items = [('✦  매칭 설정',0),('▣  주문 · 출고요청',1),('↗  실제 출고 · ERP',2),('◫  출력 이력',3),('⚙  설정 · 백업',4)]
+        tabs.add(login_frame,text='5  주문 수집')
+        from .closed_mall_ui import ClosedMallPanel
+        self.closed_mall_panel = ClosedMallPanel(login_frame, self.root)
+        nav_items = [('✦  매칭 설정',0),('▣  주문 · 출고요청',1),('↗  실제 출고 · ERP',2),('◫  출력 이력',3),('⚙  설정 · 백업',4),('◉  주문 수집',5)]
         self.nav_buttons = []
         def select_page(index):
             tabs.select(index)
@@ -351,6 +355,10 @@ class Desktop:
         result_tabs.add(amount_frame,text='2  금액 매칭 및 세트 분리')
         result_tabs.add(esm_frame,text='2-1  옥션/지마켓 ERP전환')
         result_tabs.add(erp_frame,text='3  ERP 파일 생성 및 다운로드')
+        tracking_frame = ttk.Frame(result_tabs,padding=20)
+        result_tabs.add(tracking_frame,text='4  위킵 송장 가져오기')
+        from .tracking_ui import TrackingPanel
+        self.tracking_panel = TrackingPanel(self,tracking_frame)
         ttk.Label(result_input,text='당일 출고건 확인',font=(self.font_family,18,'bold')).pack(anchor='w')
         ttk.Label(result_input,text='선택한 날짜의 출고건을 불러온 뒤, 이번 ERP Excel에 적용할 창고와 품목만 변경할 수 있습니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
         result_card = ttk.LabelFrame(result_input,text='입력 파일',padding=18)
@@ -697,6 +705,7 @@ class Desktop:
 
     def quit_app(self):
         self._quitting = True
+        self.closed_mall_panel.shutdown()
         if self.tray_icon:
             try:self.tray_icon.stop()
             except Exception:pass
@@ -783,7 +792,7 @@ class Desktop:
             if win is not None and win.winfo_exists():win.destroy()
             messagebox.showerror(
                 '공유 DB 연결 실패',
-                f'{exc}\n\nSupabase SQL Editor에서 002_reqm_shared_workspace.sql을 먼저 실행했는지 확인하세요.',
+                str(exc) if isinstance(exc, WorkspaceFormatError) else f'{exc}\n\n공유 DB 설정과 계정 권한, 네트워크 연결을 확인하세요.',
                 parent=self.root,
             )
             return
@@ -1314,6 +1323,7 @@ class Desktop:
         self.refresh_orders()
 
     def refresh(self):
+        if hasattr(self,'tracking_panel'):self.tracking_panel.refresh()
         self.refresh_orders()
         self.refresh_erp_shipments()
         self.refresh_confirmed_shipments()

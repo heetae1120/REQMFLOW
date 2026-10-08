@@ -8,16 +8,21 @@ from pathlib import Path
 
 
 WORKSPACE_KEY = "default"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 TABLE_ORDER = (
     "orders", "mappings", "item_names", "event_rules", "requests", "request_lines",
     "shipments", "smartstore_erp_rows", "smartstore_purchase_rows", "esm_erp_rows",
     "fees", "artifacts", "source_files", "artifact_notes", "events",
+    "tracking_jobs", "tracking_rows", "tracking_queries",
 )
 DELETE_ORDER = tuple(reversed(TABLE_ORDER))
 
 
 class WorkspaceConflict(RuntimeError):
+    pass
+
+
+class WorkspaceFormatError(RuntimeError):
     pass
 
 
@@ -50,20 +55,24 @@ def workspace_digest(state: dict) -> str:
 
 
 def import_workspace(service, state: dict) -> None:
-    source_version=int(state.get("schema_version",0))
-    if source_version not in (1, 2, 3, 4, 5, 6, SCHEMA_VERSION):
-        raise RuntimeError("지원하지 않는 공유 DB 형식입니다.")
+    if not isinstance(state, dict) or state.get('schema_version') not in range(1, SCHEMA_VERSION + 1):
+        raise WorkspaceFormatError(f"공유 DB 형식을 읽을 수 없습니다. 이 프로그램은 형식 {SCHEMA_VERSION}까지 지원합니다. 최신 FLOW로 업데이트하세요.")
+    source_version=int(state['schema_version'])
     tables = state.get("tables") or {}
+    if not isinstance(tables, dict) or set(tables) - set(TABLE_ORDER):
+        raise WorkspaceFormatError('공유 DB에 지원하지 않는 테이블이 있습니다. 데이터 보호를 위해 연결을 중단했습니다. 최신 FLOW로 업데이트하세요.')
+    table_columns = {table: [row['name'] for row in service.db.execute(f'PRAGMA table_info("{table}")')] for table in TABLE_ORDER}
+    for table, rows in tables.items():
+        if not isinstance(rows, list) or any(not isinstance(row, dict) or set(row) - set(table_columns[table]) for row in rows):
+            raise WorkspaceFormatError('공유 DB에 지원하지 않는 필드가 있습니다. 데이터 보호를 위해 연결을 중단했습니다. 최신 FLOW로 업데이트하세요.')
     with service.db:
         for table in DELETE_ORDER:
             service.db.execute(f'DELETE FROM "{table}"')
         for table in TABLE_ORDER:
-            columns = [row["name"] for row in service.db.execute(f'PRAGMA table_info("{table}")')]
             for source in tables.get(table,[]):
-                values = [_decode_value(
-                    1 if table == 'shipments' and column == 'amount_split_confirmed' and column not in source
-                    else source.get(column)
-                ) for column in columns]
+                # Missing columns from older schemas must use SQLite defaults.
+                columns = [column for column in table_columns[table] if column in source]
+                values = [_decode_value(source.get(column)) for column in columns]
                 marks = ",".join("?" for _ in columns)
                 names = ",".join(f'"{column}"' for column in columns)
                 service.db.execute(f'INSERT INTO "{table}" ({names}) VALUES ({marks})',values)

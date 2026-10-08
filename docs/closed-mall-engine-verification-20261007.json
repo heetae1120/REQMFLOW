@@ -1,0 +1,194 @@
+{
+  "date": "2026-10-07",
+  "scope": "login-only",
+  "verified": 12,
+  "vendors": [
+    {
+      "key": "eri",
+      "vendor": "이알아이",
+      "method": "manual_sms",
+      "state": "deferred",
+      "note": "사용자 요청으로 실제 휴대전화 인증 보류"
+    },
+    {
+      "key": "samsung",
+      "vendor": "삼성카드복지몰",
+      "method": "manual_sms",
+      "state": "deferred",
+      "note": "사용자 요청으로 실제 휴대전화 인증 보류"
+    },
+    {
+      "key": "handsome",
+      "vendor": "한섬",
+      "method": "manual_sms",
+      "state": "deferred",
+      "note": "사용자 요청으로 실제 휴대전화 인증 보류"
+    },
+    {
+      "key": "ably",
+      "vendor": "에이블리",
+      "method": "unverified",
+      "state": "verified",
+      "note": "실제 업무 화면 확인"
+    },
+    {
+      "key": "zigzag",
+      "vendor": "지그재그",
+      "method": "unverified",
+      "state": "verified",
+      "note": "실제 업무 화면 확인"
+    },
+    {
+      "key": "ohou",
+      "vendor": "오늘의집",
+      "method": "email",
+      "state": "verified",
+      "note": "실제 업무 화면 확인"
+    },
+    {
+      "key": "kream",
+      "vendor": "크림",
+      "method": "email",
+      "state": "verified_screen_mode",
+      "note": "FLOW 화면 실행 모드에서 REQM 이메일 자동 인증 및 업무 화면 진입 성공. 헤드리스 실행은 로그인 API 사전 요청 500으로 실패.",
+      "computer_use_retry": "success",
+      "retry_auth": "REQM 이메일 OTP → /brand 업무 화면",
+      "engine_retry": {
+        "status": "failed",
+        "seconds": 51.2,
+        "stage": "credentials_submitted",
+        "reason": "전용 프로필과 새 프로필 모두 OTP 화면이 열리지 않음. 추가 네트워크 진단에서 로그인 API OPTIONS 응답 500 및 PreflightMissingAllowOriginHeader 확인. POST는 net::ERR_FAILED. 500 발생의 근본 원인은 미확정.",
+        "network_diagnosis": {
+          "host": "partner-api.kream.co.kr",
+          "path": "/api/v1/auth/login",
+          "preflight_status": 500,
+          "cors_error": "PreflightMissingAllowOriginHeader",
+          "login_request_error": "net::ERR_FAILED",
+          "credentials_match": true,
+          "next_button_enabled": true,
+          "otp_visible": false
+        },
+        "mode_comparison": {
+          "browser_version": "154.0.8037.98",
+          "same_account_and_profile": true,
+          "headed_preflight_status": 200,
+          "headed_login_status": 200,
+          "headed_otp_visible": true,
+          "subsequent_headless_preflight_status": 500,
+          "headed_full_engine_status": "success",
+          "headed_full_engine_seconds": 24.3,
+          "headed_full_engine_auth": "REQM 이메일 새 OTP 자동 수신·입력",
+          "interpretation": "헤드리스 실행과 실패의 연관성 재현. 크림 측 차단 정책 또는 호환성 문제의 근본 원인은 미확정. 최소화 창 방식은 미검증."
+        }
+      }
+    },
+    {
+      "key": "hmall",
+      "vendor": "현대홈쇼핑",
+      "method": "optional_email",
+      "state": "verified",
+      "note": "실제 업무 화면 확인"
+    },
+    {
+      "key": "sammall",
+      "vendor": "삼몰",
+      "method": "password",
+      "state": "verified",
+      "note": "실제 업무 화면 확인"
+    },
+    {
+      "key": "kurly",
+      "vendor": "컬리",
+      "method": "password",
+      "state": "verified",
+      "note": "실제 업무 화면 확인"
+    },
+    {
+      "key": "shopby",
+      "vendor": "shop by",
+      "method": "password",
+      "state": "verified",
+      "note": "실제 업무 화면 확인"
+    },
+    {
+      "key": "etbs",
+      "vendor": "이제너두 ETBS",
+      "method": "password",
+      "state": "verified",
+      "note": "실제 업무 화면 확인"
+    },
+    {
+      "key": "ssf",
+      "vendor": "SSF SHOP",
+      "method": "sms",
+      "state": "pending",
+      "note": "전용 Google 메시지 최초 연결 및 인증 확인 필요"
+    },
+    {
+      "key": "wconcept",
+      "vendor": "W컨셉",
+      "method": "sms",
+      "state": "verified_with_sms_bridge",
+      "note": "FLOW 헤드리스 엔진에서 인증 팝업·SMS 입력·부모 업무 화면 진입 성공. 문자는 기존 연결 Chrome에서 테스트 중 전달. 전용 Google 메시지 자동 수신은 미검증.",
+      "computer_use_retry": "success",
+      "retry_auth": "별도 /Auth/TwoFactorAuth 팝업 → CS 2054 SMS → 업무 화면",
+      "engine_retry": {
+        "status": "awaiting_sms_connection",
+        "seconds": 14.3,
+        "stage": "code_request",
+        "reason": "별도 인증 팝업 진입 및 인증번호 요청·입력 대기 확인. 전용 Google 메시지 미연결로 완료 미검증. 무인 테스트 콜백은 직접 입력을 취소함."
+      },
+      "engine_sms_bridge_test": {
+        "status": "success",
+        "background": true,
+        "seconds": 87.0,
+        "profile": "fresh isolated test profile",
+        "sms_source": "기존 Chrome의 REQM CS Google 메시지, 이번 요청 수신 시각 확인 후 테스트 콜백으로 전달",
+        "dedicated_sms_auto_receive_verified": false,
+        "earlier_attempt": "인증 후 업무 화면이 열렸지만 브라우저 오류로 결과 기록. 새 프로필 재검증에서는 성공. 오류 원인은 미확정.",
+        "timing_note": "문자 확인·전달 대기 포함"
+      }
+    },
+    {
+      "key": "hottracks",
+      "vendor": "핫트랙스",
+      "method": "sms",
+      "state": "pending",
+      "note": "SMS 발송 및 인증 입력란(confNum) 확인·어댑터 반영. 전용 Google 메시지 최초 연결 후 인증 완료 검증 필요"
+    },
+    {
+      "key": "benepia",
+      "vendor": "베네피아",
+      "method": "email",
+      "state": "verified",
+      "note": "실제 업무 화면 확인"
+    },
+    {
+      "key": "ezwel",
+      "vendor": "현대이지웰",
+      "method": "email",
+      "state": "verified",
+      "note": "실제 업무 화면 확인 · 이메일 인증 및 복지샵 전환"
+    },
+    {
+      "key": "musinsa",
+      "vendor": "무신사",
+      "method": "email",
+      "state": "verified",
+      "note": "실제 업무 화면 확인"
+    },
+    {
+      "key": "29cm",
+      "vendor": "29CM",
+      "method": "email",
+      "state": "verified",
+      "note": "실제 업무 화면 확인"
+    }
+  ],
+  "tests": {
+    "total_suite_passed": 119,
+    "login_regressions": 23,
+    "desktop_self_test": "ok"
+  },
+  "executable_release": false
+}

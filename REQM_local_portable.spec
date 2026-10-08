@@ -1,7 +1,7 @@
 # Build: python tools/build_portable.py
 from pathlib import Path
 import sys
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 sys.path.insert(0, str(Path('.builddeps').resolve()))
 
@@ -11,6 +11,7 @@ datas=[
     ('assets/branding','assets/branding'),
 ]
 selenium_hiddenimports=collect_submodules('selenium')
+datas += collect_data_files('selenium')
 if Path('config.json').exists():
     datas.append(('config.json','.'))
 
