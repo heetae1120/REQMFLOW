@@ -48,20 +48,33 @@ def delivery_key(row):
 
 def reconcile(orders, remote_rows):
     by_order = defaultdict(list)
+    source_channels = defaultdict(set)
+    for order in orders:
+        for key in ('order_no', 'line_no'):
+            if order.get(key):
+                source_channels[identity(order[key])].add(identity(order.get('channel')))
     for remote in remote_rows:
         by_order[identity(remote.get('order_no'))].append(remote)
     results = []
     for order in orders:
         candidates = list(by_order.get(identity(order.get('order_no')), [])) if order.get('order_no') else []
+        alternate = False
+        if not candidates and order.get('line_no'):
+            candidates = list(by_order.get(identity(order['line_no']), []))
+            alternate = bool(candidates)
         result = {'state': 'not_found', 'reason': '위킵에서 주문번호를 찾지 못했습니다.',
                   'tracking': '', 'candidates': candidates}
         if candidates:
             result.update(state='review', reason='배송정보가 다르거나 확인할 정보가 부족합니다.')
             verified = []
             for candidate in candidates:
+                if len(source_channels[identity(candidate.get('order_no'))]) > 1 and not candidate.get('channel'):
+                    continue
                 # Explicit different channel/account/line values must not be collapsed.
                 if any(order.get(k) and candidate.get(k) and identity(order[k]) != identity(candidate[k])
-                       for k in ('channel', 'account', 'line_no')):
+                       for k in ('channel', 'account')):
+                    continue
+                if not alternate and order.get('line_no') and candidate.get('line_no') and identity(order['line_no']) != identity(candidate['line_no']):
                     continue
                 key = delivery_key(order)
                 if key is not None and delivery_key(candidate) == key:
@@ -73,11 +86,16 @@ def reconcile(orders, remote_rows):
                 if len(verified) != len(candidates):
                     result['reason'] = '같은 주문번호에 서로 다른 배송정보가 있습니다. 후보를 확인하세요.'
                 elif len(numbers) == 1:
-                    result.update(state='matched', reason='주문번호·수령인·연락처·우편번호·주소 일치', tracking=numbers[0])
+                    result.update(state='matched', reason=('상품주문번호' if alternate else '주문번호') + '·수령인·연락처·우편번호·주소 일치', tracking=numbers[0])
                 elif not numbers:
                     result.update(state='pending', reason='주문은 확인됐지만 송장이 아직 발급되지 않았습니다.')
                 else:
                     result['reason'] = '여러 송장 확인: ' + ', '.join(numbers)
-        # Delivery peers can be offered for manual confirmation; never copy implicitly.
+        if not candidates and delivery_key(order) is not None:
+            peers = [r for r in remote_rows if delivery_key(r) == delivery_key(order)
+                     and not any(order.get(k) and r.get(k) and identity(order[k]) != identity(r[k])
+                                 for k in ('channel', 'account'))]
+            if peers:
+                result.update(state='review', reason='배송정보는 일치하지만 주문번호가 다릅니다. 판매처·상품과 후보 송장을 확인하세요.', candidates=peers)
         results.append(result)
     return results

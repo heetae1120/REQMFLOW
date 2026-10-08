@@ -191,8 +191,19 @@ def collect_tracking(driver, start, end, kind, wait_factory=None, report=lambda 
                     raise RuntimeError('위킵 조회 결과의 주문등록일이 요청 범위를 벗어납니다.')
                 row['_detail_id'] = detail_id
                 results.append(row)
-        links = [link for link in driver.find_elements('tag name', 'a')
-                 if link.text.strip() == '>' and link.is_displayed() and link.is_enabled()
+        # WeKeep renders the next-block arrow as an image (empty link.text).
+        # Visit the next numbered page before advancing to another page block.
+        links = driver.execute_script('''
+          const pager = document.querySelector('ul.pagination');
+          if (!pager) return [];
+          const active = pager.querySelector('li.active');
+          const current = Number(active && active.textContent.trim());
+          const numbered = [...pager.querySelectorAll('a')].filter(a => a.textContent.trim() === String(current + 1));
+          if (numbered.length) return numbered;
+          return [...pager.querySelectorAll('a')].filter(a =>
+            a.textContent.trim() === '>' || a.querySelector('img[alt=">"]'));
+        ''')
+        links = [link for link in links if link.is_displayed() and link.is_enabled()
                  and link.get_attribute('aria-disabled') != 'true'
                  and 'disabled' not in (link.get_attribute('class') or '').split()]
         if not links:

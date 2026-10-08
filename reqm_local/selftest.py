@@ -76,8 +76,27 @@ def run(folder):
         app.tracking_panel.day.set('2026-10-01');app.refresh();root.update_idletasks()
         assert len(app.tracking_panel.job_tree.get_children())==1
         assert len(app.tracking_panel.row_tree.get_children())==1
+        from .tracking import HEADERS
+        from .tracking_store import encode
+        combined=folder/'demo-combined-shipping.xlsx'
+        combined.write_bytes(workbook_bytes(HEADERS[:10],[
+            ['COMBINED-A','오늘의집','데모 상품',1,'가상 수령인','01000000000','00123','실제 배송 금지 테스트 주소','',''],
+            ['COMBINED-B','지마켓','데모 상품',1,'가상 수령인','01000000000','00123','실제 배송 금지 테스트 주소','','']]))
+        combined_job=service.import_tracking_files([combined],'2026-10-02')[0][0]
+        combined_rows=service.tracking_rows(combined_job)
+        assert [r['data']['channel'] for r in combined_rows]==['오늘의집','지마켓']
+        combined_remote=[{**r['data'],'tracking':'001234567890'} for r in combined_rows]
+        with service.db:
+            for r in combined_rows:
+                broken={**r['data'],'channel':'이알아이','phone':'','recipient':''}
+                service.db.execute('UPDATE tracking_rows SET data=? WHERE id=?',(encode(broken),r['id']))
+        service.apply_tracking_query(combined_job,combined_remote,'2026-10-02','2026-10-02')
+        repaired=service.tracking_rows(combined_job)
+        assert [r['data']['channel'] for r in repaired]==['오늘의집','지마켓']
+        assert all(r['data']['phone']=='01000000000' and r['state']=='matched' for r in repaired)
         (folder/'self-test.json').write_text(json.dumps({'ok':True,'version':APP_VERSION,'orders':1,'artifacts':2,
-            'desktop':'OK','font':app.font_family,'cloud_config':'OK','tracking':'OK','workspace_roundtrip':'OK'},ensure_ascii=False),encoding='utf-8')
+            'desktop':'OK','font':app.font_family,'cloud_config':'OK','tracking':'OK','combined_import_repair':'OK',
+            'workspace_roundtrip':'OK'},ensure_ascii=False),encoding='utf-8')
     except Exception as exc:
         (folder/'self-test.json').write_text(json.dumps({'ok':False,'error':str(exc)},ensure_ascii=False),encoding='utf-8')
         raise
