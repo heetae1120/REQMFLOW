@@ -71,7 +71,7 @@ class CodeWindowTests(unittest.TestCase):
         self.assertEqual(loaded['29cm'].password, 'untouched')
         self.assertEqual(entries[1].get(), '')
         self.assertNotIn(b' new secret ', (self.panel.folder / 'accounts.dat').read_bytes())
-        self.assertEqual(self.panel.table.set('kream', '계정'), '등록됨')
+        self.assertIn('kream', self.panel.accounts)
 
     def test_existing_password_is_not_shown_and_blank_edit_preserves_it(self):
         self.panel.accounts = {'mail_reqm': Account('old', ' private ')}
@@ -94,6 +94,31 @@ class CodeWindowTests(unittest.TestCase):
         entries[2].insert(0, '001234')
         save.invoke()
         self.assertEqual(load_accounts(self.panel.folder)['ezwel'].merchant_code, '001234')
+
+    def test_sms_settings_saved_separately_and_disconnected_is_not_ready(self):
+        from tkinter import ttk
+        from reqm_local.auth_settings import load_settings
+        self.panel.manage_accounts('ssf')
+        widgets = self.widgets(self.panel.account_window)
+        next(w for w in widgets if isinstance(w, ttk.Checkbutton) and w.cget('text') == 'SMS 자동 수신 시도 활성화').invoke()
+        next(w for w in widgets if isinstance(w, ttk.Button) and w.cget('text') == '인증 설정 저장').invoke()
+        self.assertTrue(load_settings(self.panel.folder)['sms_enabled'])
+        self.assertFalse((self.panel.folder / 'accounts.dat').exists())
+        self.panel.check_sms()
+        self.assertIn('확인 불가', self.panel.sms_status.get())
+        self.assertFalse(self.panel.sms_check_running)
+
+    def test_collection_columns_and_live_login_result_do_not_claim_download(self):
+        from reqm_local.closed_malls import LoginResult
+        self.assertEqual(tuple(self.panel.table['columns']), ('판매처', '로그인', '수집 대상 주문', '엑셀 다운로드', '진행 상태 / 결과'))
+        self.panel.selected_run = {'29cm'}
+        self.panel.events.put(('login_result', LoginResult('29CM', '성공', '업무 화면 확인', 2.5)))
+        self.panel.poll()
+        self.assertEqual(self.panel.table.set('29cm', '로그인'), '성공')
+        self.assertEqual(self.panel.table.set('29cm', '수집 대상 주문'), '—')
+        self.assertEqual(self.panel.table.set('29cm', '엑셀 다운로드'), '—')
+        self.assertIn('미구현', self.panel.table.set('29cm', '진행 상태 / 결과'))
+        self.assertIn('완료 0', self.panel.summary_text.get())
 
     def test_save_failure_does_not_change_account_and_running_blocks_editor(self):
         self.panel.accounts = {'kream': Account('old', 'old-secret')}

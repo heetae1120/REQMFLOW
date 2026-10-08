@@ -412,7 +412,7 @@ def connect_auth_browser(folder):
         raise
 
 
-def run_logins(folder, accounts, malls, stop, report, ask_code, background=True, driver_factory=None):
+def run_logins(folder, accounts, malls, stop, report, ask_code, background=True, driver_factory=None, sms_account='reqm.cs@gmail.com', on_result=None):
     if not LOGIN_LOCK.acquire(blocking=False):
         raise RuntimeError('폐쇄몰 브라우저가 실행 중입니다. 세션을 닫은 뒤 다시 실행하세요.')
     session = None
@@ -424,7 +424,7 @@ def run_logins(folder, accounts, malls, stop, report, ask_code, background=True,
         session = LoginSession(driver)
         driver.set_page_load_timeout(35)
         browser = BrowserLogin(driver, stop, report, ask_code)
-        browser.code_source = BrowserCodeSource(browser, accounts)
+        browser.code_source = BrowserCodeSource(browser, accounts, sms_account)
         # There is exactly one worker; both SSO destinations complete sequentially.
         for mall in malls:
             if stop.is_set():
@@ -445,6 +445,8 @@ def run_logins(folder, accounts, malls, stop, report, ask_code, background=True,
                 # Selenium errors can contain form values, cookies and request URLs.
                 result = LoginResult(mall.name, '실패', '브라우저 연결 또는 사이트 화면 오류. 화면 확인 모드에서 확인하세요.', round(time.monotonic()-started, 1))
             session.results.append(result)
+            if on_result:
+                on_result(result)
             report(mall.key, result.status + ' · ' + result.reason + f' · {result.seconds}초')
         save_results(folder, session.results)
         return session

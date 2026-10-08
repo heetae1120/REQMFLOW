@@ -10,7 +10,7 @@
 - ERP 판매전표 생성 및 출력 이력 관리
 - 로컬 SQLite 저장과 Supabase 공유 작업공간 동기화
 - Windows 패키징 및 자동 업데이트 지원
-- 폐쇄몰 로그인 화면: 19개 판매처 계정 입력, 이메일·SMS 인증 수신, 작업자 인증번호 입력창, 무신사·29CM 순차 실행 및 결과 기록 ([지원 범위와 검증 상태](docs/closed-mall-login.md))
+- 주문 수집 화면: 19개 판매처 계정 입력, 이메일·SMS 인증 수신, 작업자 인증번호 입력창, 무신사·29CM 순차 실행 및 결과 기록 ([지원 범위와 검증 상태](docs/closed-mall-login.md))
 
 자세한 설치, 운영 및 복구 방법은 [LOCAL_PROGRAM.md](LOCAL_PROGRAM.md)를 참고하세요.
 

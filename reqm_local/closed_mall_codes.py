@@ -41,10 +41,11 @@ def message_code(text, authenticated_mail=False):
 
 
 class BrowserCodeSource:
-    def __init__(self, browser, accounts):
+    def __init__(self, browser, accounts, sms_account='reqm.cs@gmail.com'):
         self.browser = browser
         self.driver = browser.driver
         self.accounts = accounts
+        self.sms_account = sms_account
         self.tabs = {}
         self.baseline = {}
 
@@ -102,11 +103,11 @@ class BrowserCodeSource:
         self._tab('sms', MESSAGES_URL)
         self.browser.wait(lambda: self.browser.visible('mws-conversation-list-item'), 12)
         labels = [e.get_attribute('aria-label') or '' for e in self.driver.find_elements('css selector', '[aria-label]')]
-        if not any('reqm.cs@gmail.com' in label for label in labels):
+        if not any(self.sms_account.lower() in label.lower() for label in labels):
             raise ValueError('Google 메시지를 REQM CS 계정으로 연결하세요.')
 
     def prepare(self, mall):
-        if mall.method == 'manual_sms' or not (mall.mailbox or mall.sender):
+        if not mall.automatic_code or mall.method == 'manual_sms' or not (mall.mailbox or mall.sender):
             return
         original = self.driver.current_window_handle
         try:
@@ -116,6 +117,7 @@ class BrowserCodeSource:
                 self.baseline[mall.key] = ('mail', {message_id(url) for url, _ in links}, max((int(message_id(url)) for url, _ in links), default=0))
             else:
                 self._sms()
+                self.browser.report('__sms__', '메시지 접근 확인 · 새 SMS 수신 검증 전')
                 rows = self._sms_rows(mall)
                 if not rows:
                     raise ValueError('인증 발신번호 대화가 없습니다.')
@@ -126,6 +128,8 @@ class BrowserCodeSource:
         except Exception:
             self.browser.check_stop()
             self.baseline.pop(mall.key, None)
+            if mall.sender:
+                self.browser.report('__sms__', '확인 불가 · 자동 수신 연결 실패')
             self.browser.report(mall.key, '인증 수신 연결 미확인 · 필요시 FLOW에서 직접 입력')
         finally:
             self.driver.switch_to.window(original)
@@ -170,6 +174,7 @@ class BrowserCodeSource:
                     for row in self._sms_rows(mall):
                         code = message_code(row)
                         if code and code not in seen:
+                            self.browser.report('__sms__', '이번 요청의 새 인증 문자 읽기 확인 · 로그인 성공 여부 별도 확인')
                             self.baseline.pop(mall.key, None)
                             return code
                 self.browser.stop.wait(2)

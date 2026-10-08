@@ -22,6 +22,7 @@ class Mall:
     mailbox: str = ''
     sender: str = ''
     shared_login: str = ''
+    automatic_code: bool = True
 
 
 MALLS = (
