@@ -219,6 +219,40 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(self.s.settings['profiles'][0]['detected_headers']['1'],'주문번호')
         self.assertEqual(workspace_digest(export_workspace(self.s)),digest)
 
+    def test_shared_workspace_v7_preserves_item_names_and_shipment_fields(self):
+        _, order = self.import_order()
+        self.request(order)
+        state = export_workspace(self.s)
+        state['tables']['item_names'] = [{'erp_item_code': 'TEST', 'matching_name': '테스트 품목명'}]
+        line = state['tables']['request_lines'][0]['id']
+        state['tables']['shipments'] = [dict(id='SYNTHETIC', line_id=line, qty=1, tracking='TEST', day='2026-10-08', erp_id=None, erp_amount='3333', erp_code='TEST', erp_name='테스트', erp_warehouse='300', amount_split_confirmed=1)]
+        import_workspace(self.s, state)
+        self.assertEqual(workspace_digest(export_workspace(self.s)), workspace_digest(state))
+
+    def test_shared_workspace_unknown_schema_or_fields_leave_data_unchanged(self):
+        self.import_order()
+        before = export_workspace(self.s)
+        for change in ('schema', 'table', 'column'):
+            state = json.loads(json.dumps(before))
+            if change == 'schema': state['schema_version'] = 8
+            elif change == 'table': state['tables']['future_table'] = []
+            else: state['tables']['orders'][0]['future_column'] = 'test'
+            with self.assertRaises(RuntimeError): import_workspace(self.s, state)
+            self.assertEqual(workspace_digest(export_workspace(self.s)), workspace_digest(before))
+
+    def test_shared_workspace_v5_uses_defaults_for_new_columns(self):
+        _, order = self.import_order()
+        self.request(order)
+        state = export_workspace(self.s)
+        state['schema_version'] = 5
+        del state['tables']['item_names']
+        line = state['tables']['request_lines'][0]['id']
+        state['tables']['shipments'] = [dict(id='LEGACY', line_id=line, qty=1, tracking='TEST', day='2026-10-08', erp_id=None, erp_amount=None)]
+        import_workspace(self.s, state)
+        shipment = export_workspace(self.s)['tables']['shipments'][0]
+        self.assertEqual(shipment['amount_split_confirmed'], 0)
+        self.assertIsNone(shipment['erp_code'])
+
     def import_order(self, q=3, amount=10001, line='A1', fee=3000, bundle='B1', product='테스트상품', channel='오늘의집'):
         path=self.folder/f'{line}.xlsx'
         path.write_bytes(workbook_bytes(HEADERS,[['O1',line,product,'기본',q,amount,'가상수령인','01000000000','00123','테스트 주소',bundle,fee,'결제완료','2026-09-30']]))

@@ -110,6 +110,7 @@ class Operations:
         CREATE TABLE IF NOT EXISTS orders(id TEXT PRIMARY KEY, identity TEXT UNIQUE NOT NULL, data TEXT NOT NULL,
             components TEXT NOT NULL DEFAULT '[]', state TEXT NOT NULL, issue TEXT NOT NULL DEFAULT '');
         CREATE TABLE IF NOT EXISTS mappings(key TEXT PRIMARY KEY, components TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS item_names(erp_item_code TEXT PRIMARY KEY, matching_name TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS event_rules(id TEXT PRIMARY KEY, channel TEXT NOT NULL, name TEXT NOT NULL,
             source_product TEXT NOT NULL, source_option TEXT NOT NULL, target_product TEXT NOT NULL,
             target_option TEXT NOT NULL, target_amount TEXT NOT NULL, components TEXT NOT NULL DEFAULT '[]',
@@ -145,6 +146,9 @@ class Operations:
         shipment_columns = {row['name'] for row in self.db.execute('PRAGMA table_info(shipments)')}
         if 'erp_amount' not in shipment_columns:
             self.db.execute("ALTER TABLE shipments ADD COLUMN erp_amount TEXT")
+        for name, definition in [('erp_code', 'TEXT'), ('erp_name', 'TEXT'), ('erp_warehouse', 'TEXT'), ('amount_split_confirmed', 'INTEGER NOT NULL DEFAULT 0')]:
+            if name not in shipment_columns:
+                self.db.execute(f'ALTER TABLE shipments ADD COLUMN {name} {definition}')
 
     def close(self):
         self.db.close()

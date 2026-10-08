@@ -27,7 +27,7 @@ from .ui_helpers import (
     autosize_tree, bind_desktop_drag, bind_tree_sorting, bind_wide_combobox, filter_combobox_choices,
     post_combobox, search_suggestions,
 )
-from .workspace_cloud import CloudWorkspace, WorkspaceConflict
+from .workspace_cloud import CloudWorkspace, WorkspaceConflict, WorkspaceFormatError
 from .profiles import (
     PROFILE_PRESETS, SALES_CHANNELS, MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING,
     SMARTSTORE_PURCHASE_MAPPING, SMARTSTORE_PURCHASE_CHANNEL,
@@ -37,7 +37,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.17'
+APP_VERSION = '1.9.18'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -762,7 +762,7 @@ class Desktop:
             if win is not None and win.winfo_exists():win.destroy()
             messagebox.showerror(
                 '공유 DB 연결 실패',
-                f'{exc}\n\nSupabase SQL Editor에서 002_reqm_shared_workspace.sql을 먼저 실행했는지 확인하세요.',
+                str(exc) if isinstance(exc, WorkspaceFormatError) else f'{exc}\n\n공유 DB 설정과 계정 권한, 네트워크 연결을 확인하세요.',
                 parent=self.root,
             )
             return
