@@ -37,7 +37,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.15'
+APP_VERSION = '1.9.20'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -1978,9 +1978,13 @@ class Desktop:
         ttk.Label(win,text=f"{data.get('order_no')}  |  {data.get('product')} / {data.get('option')}",padding=(16,0),wraplength=1050).pack(anchor='w')
         ttk.Label(win,text=f"주문수량 {data['quantity']} · ERP 총금액 {int(Decimal(data['amount'])):,}원 · 첫 구성품 금액은 나머지 금액으로 자동 계산됩니다.",foreground='#64748B',padding=(16,6)).pack(anchor='w')
         grid=ttk.Frame(win,padding=16);grid.pack(fill='both',expand=True)
-        labels=['ERP 품목코드','품목명','부속품 단가','출하창고','거래처코드']
+        labels=['ERP 품목코드','매칭품목명','부속품 단가','출하창고','거래처코드']
         for column,label in enumerate(labels):ttk.Label(grid,text=label).grid(row=0,column=column,padx=4,pady=6,sticky='w')
+        for column in (0,1,4):grid.columnconfigure(column,weight=2)
         entries=[];customer=self.service.channel_customer_code(channel)
+        customer_choices=self.service.customer_choices()
+        item_choices={item['code']:item['name'] for item in self.service.item_choices()}
+        catalog_choices=[f'{code} · {name}' if name else code for code,name in item_choices.items()]
         def add_row(component=None):
             component=component or {};index=len(entries);q=max(1,int(component.get('quantity') or data.get('quantity') or 1))
             unit='0' if index==0 else str(int(Decimal(component.get('amount','0'))/Decimal(q)))
@@ -1993,7 +1997,32 @@ class Desktop:
             }
             widgets=[]
             for column,key in enumerate(('code','name','unit_amount','warehouse','customer')):
-                widget=ttk.Entry(grid,textvariable=values[key],width=(24 if key in ('code','customer') else 34 if key=='name' else 13))
+                if key in ('code','warehouse','customer'):
+                    choices=(catalog_choices if key=='code' else
+                             ['100 본사창고','300 위킵창고'] if key=='warehouse' else customer_choices)
+                    widget=ttk.Combobox(
+                        grid,textvariable=values[key],values=choices,
+                        width=(24 if key in ('code','customer') else 13),
+                    )
+                    def chosen(_event,values=values,key=key):
+                        value=_event.widget.get().split(' · ',1)[0]
+                        values[key].set(value)
+                        if key=='code':
+                            values['name'].set(self.service.item_name(value,item_choices.get(value,value)))
+                    widget.bind('<<ComboboxSelected>>',chosen)
+                    def search_catalog(event,widget=widget,choices=choices):
+                        if event.keysym in ('Up','Down','Left','Right','Return','Escape','Tab'):return
+                        query=widget.get();cursor=widget.index('insert')
+                        def update():
+                            if widget.get()!=query:return
+                            post_combobox(widget,filter_combobox_choices(query,choices))
+                            widget.icursor(min(cursor,len(query)))
+                        widget.after_idle(update)
+                    widget.bind('<KeyRelease>',search_catalog)
+                    bind_wide_combobox(widget)
+                else:
+                    widget=ttk.Entry(grid,textvariable=values[key],width=(34 if key=='name' else 13))
+                widget.bind('<Double-1>',self.select_all_text)
                 widget.grid(row=index+1,column=column,padx=4,pady=4,sticky='ew');widgets.append(widget)
             entries.append((values,widgets))
         for component in row['components']:add_row(component)
