@@ -1,4 +1,5 @@
 name: Build and release REQM FLOW
+# Verify the supported Windows font fallback as well as the bundled asset.
 on:
   workflow_dispatch:
   push:
