@@ -93,6 +93,16 @@ class CloudWorkspace:
         self.version = 0
         self.last_digest = ""
 
+    def fetch_metadata(self):
+        """Check freshness without transferring the workspace payload."""
+        rows = (
+            self.client.table("reqm_workspace_state")
+            .select("workspace_key,version,updated_at")
+            .eq("workspace_key",self.workspace_key)
+            .limit(1).execute().data or []
+        )
+        return rows[0] if rows else None
+
     def fetch(self):
         rows = (
             self.client.table("reqm_workspace_state")
@@ -115,7 +125,17 @@ class CloudWorkspace:
         return "uploaded"
 
     def pull_if_newer(self) -> bool:
+        metadata = self.fetch_metadata()
+        if not metadata:
+            raise WorkspaceConflict("공유 작업공간을 찾을 수 없습니다. 다시 로그인한 뒤 작업해주세요.")
+        remote_version = int(metadata["version"])
+        if remote_version < self.version:
+            raise WorkspaceConflict("공유 작업공간 버전이 변경됐습니다. 다시 로그인한 뒤 작업해주세요.")
+        if remote_version == self.version:
+            return False
         row = self.fetch()
+        if not row or int(row["version"]) < remote_version:
+            raise WorkspaceConflict("최신 공유 자료를 확인하지 못했습니다. 새로고침한 뒤 작업해주세요.")
         return self.apply_if_newer(row)
 
     def apply_if_newer(self, row) -> bool:

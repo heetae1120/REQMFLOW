@@ -40,9 +40,10 @@ if __name__ == '__main__':
             run(sys.argv[2])
         except Exception as exc:
             import json
+            import traceback
             Path(sys.argv[2]).mkdir(parents=True,exist_ok=True)
             (Path(sys.argv[2])/'self-test.json').write_text(
-                json.dumps({'ok':False,'error':f'{type(exc).__name__}: {exc}'},ensure_ascii=False),encoding='utf-8'
+                json.dumps({'ok':False,'error':f'{type(exc).__name__}: {exc}', 'traceback':traceback.format_exc()},ensure_ascii=False),encoding='utf-8'
             )
             os._exit(1)
         os._exit(0)

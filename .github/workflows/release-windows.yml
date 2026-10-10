@@ -1,0 +1,55 @@
+name: Build and release REQM FLOW
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/release-windows.yml']
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install -r requirements-local.txt pyinstaller
+      - name: Regression tests
+        run: python -m unittest discover -s tests -v
+      - name: Build portable Windows application
+        run: python tools/build_portable.py
+      - name: Verify packaged application
+        shell: pwsh
+        run: |
+          $testDir = Join-Path $env:RUNNER_TEMP 'flow-smoke'
+          $process = Start-Process -FilePath 'dist/REQM_FLOW_Portable.exe' -ArgumentList @('--self-test', $testDir) -PassThru
+          if (-not $process.WaitForExit(180000)) { $process.Kill(); throw 'Packaged test timed out' }
+          $report = Join-Path $testDir 'self-test.json'
+          if (-not (Test-Path $report)) { throw 'Missing packaged test report' }
+          Get-Content $report
+          $result = Get-Content $report -Raw | ConvertFrom-Json
+          if (-not $result.ok) { throw 'Packaged test failed' }
+      - name: Prepare release
+        shell: pwsh
+        run: |
+          Copy-Item dist/REQM_FLOW_Portable.exe REQM_FLOW.exe
+          $hash = (Get-FileHash REQM_FLOW.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText("$pwd/REQM_FLOW.exe.sha256", "$hash  REQM_FLOW.exe" + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+          $manifest = @{version='1.9.23'; file='https://github.com/heetae1120/REQMFLOW/releases/download/v1.9.23/REQM_FLOW.exe'; sha256=$hash} | ConvertTo-Json
+          [IO.File]::WriteAllText("$pwd/latest.json", $manifest, [Text.UTF8Encoding]::new($false))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: REQM-FLOW-v1.9.23
+          path: |
+            REQM_FLOW.exe
+            REQM_FLOW.exe.sha256
+            latest.json
+          retention-days: 14
+      - name: Publish verified release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create v1.9.23 REQM_FLOW.exe REQM_FLOW.exe.sha256 latest.json --title "REQM FLOW 1.9.23" --notes-file RELEASE_NOTES_1.9.23.md --target "${{ github.sha }}"

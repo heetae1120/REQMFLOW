@@ -37,7 +37,7 @@ from .shipping import compact, channel_key
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.22'
+APP_VERSION = '1.9.23'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -99,7 +99,6 @@ class Desktop:
         self.root, self.service = root, service
         self.cloud_client = None
         self.cloud_workspace = None
-        self.cloud_polling = False
         self.tray_icon = None
         self._quitting = False
         self._source_stamp = self.source_stamp()
@@ -771,11 +770,10 @@ class Desktop:
             )
             return
         self.cloud_workspace=workspace
-        self.cloud_status.set(f'공유 DB 연결됨 · v{workspace.version}')
+        self.cloud_status.set(f'공유 DB · 수동 갱신 · v{workspace.version}')
         if win is not None and win.winfo_exists():win.destroy()
         self.refresh()
         self.load_matching_profile()
-        self.root.after(5000,self.poll_cloud_workspace)
         total=counts.get('ecount_item_reference',0)
         action='기존 공유 자료를 이 PC에 적용했습니다.' if direction=='downloaded' else '이 PC의 기존 자료를 첫 공유 자료로 올렸습니다.'
         if show_notice:
@@ -804,7 +802,7 @@ class Desktop:
                 self.load_matching_profile()
             if self.cloud_workspace:self.cloud_workspace.push_if_changed()
             version=self.cloud_workspace.version if self.cloud_workspace else 0
-            self.cloud_status.set(f'공유 DB 연결됨 · v{version}')
+            self.cloud_status.set(f'공유 DB · 수동 갱신 · v{version}')
             messagebox.showinfo('API 새로고침',f"최신 원격 품목 {counts.get('ecount_item_reference',0):,}개와 공유 DB를 반영했습니다.",parent=self.root)
         except Exception as exc:
             self._cloud_refresh_failed(str(exc))
@@ -812,20 +810,6 @@ class Desktop:
     def _cloud_refresh_failed(self,detail):
         self.cloud_status.set('API 연결 오류')
         messagebox.showerror('API 새로고침 실패',detail,parent=self.root)
-
-    def poll_cloud_workspace(self):
-        if self._quitting or not self.cloud_workspace:
-            return
-        try:
-            if self.root.grab_current() is None and self.cloud_workspace.pull_if_newer():
-                self.refresh()
-                self.load_matching_profile()
-            self.cloud_status.set(f'공유 DB 연결됨 · v{self.cloud_workspace.version}')
-        except WorkspaceConflict:
-            self.cloud_status.set('공유 DB 충돌 · 새로고침')
-        except Exception:
-            self.cloud_status.set('공유 DB 연결 확인 중')
-        self.root.after(5000,self.poll_cloud_workspace)
 
     def on_search_changed(self,*_):
         self.refresh_orders();self.update_search_suggestions()
@@ -1183,20 +1167,26 @@ class Desktop:
     def button(self,parent,label,fn,style='TButton'):
         ttk.Button(parent,text=label,style=style,command=lambda:self.safe(fn)).pack(side='left',padx=4)
 
+    def prepare_cloud_action(self):
+        """Refresh stale selections before changing data or generating output."""
+        if self.cloud_workspace and self.cloud_workspace.pull_if_newer():
+            self.refresh()
+            self.load_matching_profile()
+            self.cloud_status.set(f'공유 DB · 수동 갱신 · v{self.cloud_workspace.version}')
+            messagebox.showinfo('공유 DB 갱신','다른 PC의 최신 작업을 반영했습니다. 항목을 다시 선택해 작업해주세요.',parent=self.root)
+            return False
+        return True
+
     def safe(self,fn):
         before=None
         try:
             if self.cloud_workspace:
-                if self.cloud_workspace.pull_if_newer():
-                    self.refresh()
-                    self.load_matching_profile()
-                    messagebox.showinfo('공유 DB 갱신','다른 PC의 최신 작업을 반영했습니다. 항목을 다시 선택해 작업해주세요.',parent=self.root)
-                    return
+                if not self.prepare_cloud_action():return
                 before=self.cloud_workspace.snapshot()
             fn()
             if self.cloud_workspace:
                 self.cloud_workspace.push_if_changed()
-                self.cloud_status.set(f'공유 DB 연결됨 · v{self.cloud_workspace.version}')
+                self.cloud_status.set(f'공유 DB · 수동 갱신 · v{self.cloud_workspace.version}')
         except WorkspaceConflict as exc:
             if self.cloud_workspace and before is not None:
                 self.cloud_workspace.restore(before)
@@ -1794,6 +1784,7 @@ class Desktop:
         if not self.confirm_request_review(ids):return
         path=self.save_path('출고요청_'+self.today.get()+'.xlsx')
         if path:
+            if not self.prepare_cloud_action():return
             batch=self.service.request(ids,self.today.get(),path,excluded_channels=self.request_excluded_channels); self.refresh()
             excluded=len(selected)-len(ids)
             suffix=f'\n제외 판매처 주문 {excluded:,}건은 포함하지 않았습니다.' if excluded else ''
@@ -1816,6 +1807,7 @@ class Desktop:
     def results(self):
         path=filedialog.askopenfilename(filetypes=[('물류 결과','*.xlsx *.xls *.csv')])
         if path:
+            if not self.prepare_cloud_action():return
             new,duplicate=self.service.import_results(path,self.erp_ship_day.get());self.refresh()
             messagebox.showinfo('반영 완료',f'실제 출고 {new}행 · 중복 제외 {duplicate}행')
 
@@ -1825,6 +1817,7 @@ class Desktop:
             filetypes=[('스마트스토어 출고파일','*.xlsx *.xlsm *.xls *.csv')],
         )
         if path:
+            if not self.prepare_cloud_action():return
             new,duplicate=self.service.import_smartstore_erp(path,self.erp_ship_day.get());self.refresh()
             messagebox.showinfo('반영 완료',f'스마트스토어 출고파일 {new}행 · 중복 제외 {duplicate}행')
 
@@ -1834,6 +1827,7 @@ class Desktop:
             filetypes=[('스마트스토어 구매확정파일','*.xlsx *.xlsm *.xls *.csv')],
         )
         if path:
+            if not self.prepare_cloud_action():return
             new,duplicate=self.service.import_smartstore_purchase(path,self.erp_ship_day.get());self.refresh()
             messagebox.showinfo('반영 완료',f'스마트스토어 구매확정 {new}행 · 중복 제외 {duplicate}행')
 
@@ -2054,6 +2048,7 @@ class Desktop:
     def erp(self):
         path=self.save_path('ERP_'+self.voucher.get()+'.xlsx')
         if path:
+            if not self.prepare_cloud_action():return
             self.service.export_erp(
                 self.voucher.get(),self.through.get(),path,
                 from_day=self.erp_from.get(),include_esm=self.erp_include_esm.get(),
@@ -2063,7 +2058,9 @@ class Desktop:
 
     def reexport(self):
         row_id=self.selected(self.history)[0];key=self.history_artifacts[row_id];path=self.save_path(key+'.xlsx')
-        if path:self.service.reexport(key,path)
+        if path:
+            if not self.prepare_cloud_action():return
+            self.service.reexport(key,path)
 
     def export_tracked_order_file(self):
         row_id=self.selected(self.history)[0];row=self.history_rows[row_id]
@@ -2083,6 +2080,7 @@ class Desktop:
             filetypes=[('원본 형식',f'*{original.suffix}'),('모든 파일','*.*')],
         )
         if path:
+            if not self.prepare_cloud_action():return
             self.service.export_source_file(source,path)
             messagebox.showinfo('주문 파일 저장','송장번호가 반영된 판매처 주문 파일을 저장했습니다.',parent=self.root)
 
@@ -2100,6 +2098,7 @@ class Desktop:
     def registered(self):
         row_id=self.selected(self.history)[0];key=self.history_artifacts[row_id]
         if messagebox.askyesno('ERP 등록 확인','ERP 사이트에 해당 파일을 정상 등록했습니까?'):
+            if not self.prepare_cloud_action():return
             self.service.mark_registered(key);self.refresh()
 
     def reload_settings(self):
