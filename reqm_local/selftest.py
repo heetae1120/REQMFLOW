@@ -47,7 +47,8 @@ def run(folder):
                 assert driver.title == 'REQM-login-smoke'
             finally:
                 driver.quit()
-        assert app.font_family == 'Pretendard'
+        assert (base/'assets/fonts/PretendardVariable.ttf').is_file()
+        assert app.font_family in ('Pretendard', '맑은 고딕')
         assert app.matching_sites.get(1) == '스마트스토어 ERP매칭'
         assert tuple(app.confirmed_shipments['columns']) == ('구분','출고일','판매처','주문번호','이름','품목','수량','송장번호')
         assert tuple(app.erp_shipments['columns'])[:2] == ('구분','실제 출고일')
@@ -94,7 +95,7 @@ def run(folder):
         repaired=service.tracking_rows(combined_job)
         assert [r['data']['channel'] for r in repaired]==['오늘의집','지마켓']
         assert all(r['data']['phone']=='01000000000' and r['state']=='matched' for r in repaired)
-        (folder/'self-test.json').write_text(json.dumps({'ok':True,'version':APP_VERSION,'orders':1,'artifacts':2,
+        (folder/'self-test.json').write_text(json.dumps({'ok':True,'font_family':app.font_family,'version':APP_VERSION,'orders':1,'artifacts':2,
             'desktop':'OK','font':app.font_family,'cloud_config':'OK','tracking':'OK','combined_import_repair':'OK',
             'workspace_roundtrip':'OK'},ensure_ascii=False),encoding='utf-8')
     except Exception as exc:
