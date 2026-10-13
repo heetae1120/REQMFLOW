@@ -20,6 +20,40 @@ non-negative integer won and must add up exactly. Single items follow the
 entered total. Partial shipments are edited independently and never supply
 reusable full-set price templates.
 
+## Live allocation feedback and amount review
+
+The voucher amount dialog shows the target merchandise total, current entered
+sum and remaining amount while typing. For a 36,900 won target, entering 28,500
+won with the other entry empty shows 8,400 won remaining. The sum turns green
+with `금액 일치` at 36,900 won; excess is red and remaining is amber. Blank
+component entries count as zero for feedback only. Confirmation requires all
+entries to contain non-negative integer won and the sum to equal the target.
+The older component allocation dialog also shows the remaining amount.
+
+Price review uses verified item codes or explicitly assigned colour families,
+component quantities per set, seller and seller account. Product/option name
+similarity remains a candidate aid and does not approve a price comparison.
+Confirmed full-order history up to the shipment day supplies known per-set
+prices; future days, other configurations and partial shipments are excluded.
+Within-day history consists of orders already confirmed when the review runs.
+No inferred campaign or discount classification is applied.
+
+The work table highlights a price not present in that history, conflicting
+component allocations for the same total, and a full-order voucher total that
+differs from the source merchandise total. It shows the source/entered amounts
+and their difference. Such differences require an operator reason in the amount
+dialog before confirmation. A matching allocation sum alone does not approve
+a difference from the source. ERP preview and file generation both block
+unreviewed differences for the selected orders.
+
+Review signatures, reasons, warnings and UTC confirmation times are saved under
+`voucher:v1:review:` in mappings and accompany existing workspace sync/backup.
+Events retain the review detail. Changes to source monetary fields, composition,
+quantities or allocation invalidate an old review; recipient/address changes
+do not. Source-mismatched history without a valid review does not establish a
+price reference. Partial shipments retain the existing independent amount
+entry behavior and are not compared to a complete order's source total.
+
 ## Reuse between colours
 
 The versioned `voucher_families.json` explicitly maps colour SKUs to model

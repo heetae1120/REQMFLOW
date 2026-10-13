@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from decimal import Decimal
 from fractions import Fraction
+from datetime import datetime, timezone
 
 PREFIX = 'voucher:v1:'
 COLORS = ('블랙', '화이트', '블루', '핑크', '그린', '베이지', '버터', '민트',
@@ -22,6 +23,18 @@ def won(value):
         return amount
     except Exception:
         raise ValueError('금액은 0 이상의 원 단위 정수로 입력하세요.') from None
+
+
+def allocation_feedback(total, values):
+    """Blank component entries count as zero only in live feedback."""
+    target = won(total)
+    entered = sum((won(str(v).strip() or '0') for v in values), Decimal(0))
+    remaining = target - entered
+    if remaining > 0:
+        return f'입력 합계 {entered:,.0f}원 · 남은 금액 {remaining:,.0f}원', '#B45309', False
+    if remaining < 0:
+        return f'입력 합계 {entered:,.0f}원 · 초과 금액 {-remaining:,.0f}원', '#BE123C', False
+    return f'입력 합계 {entered:,.0f}원 · 금액 일치', '#15803D', True
 
 
 class VoucherOperations:
@@ -124,9 +137,11 @@ class VoucherOperations:
             self.event('전표 작업표 선택 출고 확정',f'{shipping_day}: {added}개 구성품')
         return added
 
-    def voucher_rule_key(self, row, total):
+    def voucher_rule_key(self, row, total=None):
         from .service import display_channel
-        if not row['full'] or len(row['components']) < 2 or row['issue']:
+        if not row['full'] or not row['components'] or row['issue']:
+            return None
+        if total is not None and len(row['components']) < 2:
             return None
         count = Fraction(str(row['data'].get('quantity') or '1'))
         if count <= 0:
@@ -136,9 +151,83 @@ class VoucherOperations:
         # Identical model appearing twice makes correspondence ambiguous.
         if len({family for family, _ in parts}) != len(parts):
             return None
-        identity = [display_channel(row['channel']), row['data'].get('account', ''), sorted(parts), str(Fraction(str(total)) / count)]
+        identity = [display_channel(row['channel']), row['data'].get('account', ''), sorted(parts)]
+        if total is not None:
+            identity.append(str(Fraction(str(total)) / count))
         digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
         return PREFIX + digest
+
+    def voucher_review_signature(self, row, total, amounts):
+        financial_data = {key:row['data'].get(key,'') for key in
+                          ('channel','account','order_no','product','option','quantity','amount')}
+        payload = [financial_data, row['full'],
+                   [(c['code'], self.voucher_family(c['code']), str(c['quantity'])) for c in row['components']],
+                   str(won(total)), [str(won(v)) for v in amounts]]
+        return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+    def voucher_review_history(self, rows):
+        groups = {}
+        for row in rows:
+            key = self.voucher_rule_key(row)
+            if key and row['confirmed'] and self.voucher_history_trusted(row):
+                groups.setdefault(key, []).append(row)
+        return groups
+
+    def voucher_review_approved(self, row):
+        record = self.db.execute('SELECT components FROM mappings WHERE key=?', (PREFIX+'review:'+row['id'],)).fetchone()
+        return bool(record and json.loads(record[0])[0]['signature'] ==
+                    self.voucher_review_signature(row,row['total'],[c['amount'] for c in row['components']]))
+
+    def voucher_history_trusted(self, row):
+        try:
+            return won(row['data'].get('amount')) == won(row['total']) or self.voucher_review_approved(row)
+        except ValueError:
+            return False
+
+    def voucher_review(self, row, total=None, amounts=None, history=None):
+        """Compare source and confirmed compositions; fuzzy names never approve prices."""
+        total = won(row['total'] if total is None else total)
+        amounts = [won(c['amount']) for c in row['components']] if amounts is None else [won(v) for v in amounts]
+        warnings = []
+        if sum(amounts, Decimal(0)) != total:
+            return ['구성품 금액 합계 불일치']
+        if row['full']:
+            try:
+                source = won(row['data'].get('amount'))
+            except ValueError:
+                warnings.append('원본 상품금액 확인 필요')
+            else:
+                if source != total:
+                    warnings.append(f'원본 금액 불일치: 원본 {source:,.0f}원 · 전표 {total:,.0f}원 · 차액 {total-source:+,.0f}원')
+        key = self.voucher_rule_key(row)
+        if key:
+            count = Fraction(str(row['data'].get('quantity') or '1'))
+            price = Fraction(str(total)) / count
+            allocations = {self.voucher_family(c['code']): Fraction(str(v))/count for c,v in zip(row['components'],amounts)}
+            peers = history if history is not None else self.voucher_rows('0001-01-01', row['day'], True)
+            if isinstance(peers, dict):peers = peers.get(key, [])
+            prices, splits = set(), []
+            for peer in peers:
+                if peer['id'] == row['id'] or peer['day'] > row['day'] or not peer['confirmed'] or self.voucher_rule_key(peer) != key or not self.voucher_history_trusted(peer):
+                    continue
+                peer_count = Fraction(str(peer['data'].get('quantity') or '1'))
+                peer_price = Fraction(str(peer['total'])) / peer_count
+                prices.add(peer_price)
+                if peer_price == price:
+                    splits.append({self.voucher_family(c['code']): Fraction(str(c['amount']))/peer_count for c in peer['components']})
+            if prices and price not in prices:
+                def money(value):
+                    return f'{Decimal(value.numerator)/Decimal(value.denominator):,.2f}'.rstrip('0').rstrip('.')+'원'
+                previous = ' / '.join(money(p) for p in sorted(prices))
+                warnings.append(f'가격 차이 확인: 기존 세트당 {previous} · 현재 {money(price)}')
+            if splits and (any(split != allocations for split in splits)):
+                warnings.append('배분 차이 확인: 같은 총금액의 과거 구성품별 배분과 다릅니다.')
+        return warnings
+
+    def voucher_review_pending(self, row, history=None):
+        if self.voucher_review_approved(row):
+            return []
+        return self.voucher_review(row, history=history)
 
     def remember_voucher_split(self, row):
         if self.db.execute('SELECT 1 FROM mappings WHERE key=?', (PREFIX + 'no-reuse:' + row['id'],)).fetchone():
@@ -172,7 +261,7 @@ class VoucherOperations:
             return None
         return [str(v.numerator) for v in amounts]
 
-    def set_voucher_amounts(self, row_id, total, amounts, remember=True):
+    def set_voucher_amounts(self, row_id, total, amounts, remember=True, review_reason=''):
         from .service import encode
         row = next((r for r in self.voucher_rows('0001-01-01', '9999-12-31') if r['id'] == row_id), None)
         if not row or row['issue'] or not row['components']:
@@ -181,6 +270,9 @@ class VoucherOperations:
         values = [won(v) for v in amounts]
         if len(values) != len(row['components']) or sum(values) != total:
             raise ValueError('구성품 금액 합계가 입력한 상품 총금액과 같아야 합니다.')
+        warnings = self.voucher_review(row,total,values)
+        if warnings and not str(review_reason).strip():
+            raise ValueError(' / '.join(warnings)+' 확인 사유를 입력하세요.')
         with self.db:
             skip_key=PREFIX + 'no-reuse:' + row_id
             if remember:self.db.execute('DELETE FROM mappings WHERE key=?', (skip_key,))
@@ -201,6 +293,12 @@ class VoucherOperations:
             row['confirmed'] = True
             for c, value in zip(row['components'], values):
                 c['amount'] = str(value)
+            review = {'signature':self.voucher_review_signature(row,total,values),
+                      'reason':str(review_reason).strip(), 'warnings':warnings,
+                      'confirmed_at':datetime.now(timezone.utc).isoformat()}
+            self.db.execute('INSERT OR REPLACE INTO mappings VALUES(?,?)',
+                            (PREFIX+'review:'+row_id,json.dumps([review],ensure_ascii=False)))
+            if warnings:self.event('전표 금액 차이 확인',json.dumps({'row_id':row_id,**review},ensure_ascii=False))
             if remember and row['full']:
                 # A manually changed total must not be assigned to unrelated
                 # orders whose source amount differs from this voucher amount.
@@ -217,6 +315,8 @@ class VoucherOperations:
                 continue
             values = self.voucher_suggestion(row)
             if values:
+                if self.voucher_review(row,sum(won(v) for v in values),values):
+                    continue
                 self.set_voucher_amounts(row['id'], sum(won(v) for v in values), values)
                 count += 1
         return count
