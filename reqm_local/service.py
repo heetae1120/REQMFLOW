@@ -173,6 +173,7 @@ class Operations(TrackingOperations, VoucherOperations):
         if 'amount_split_confirmed' not in smartstore_columns:
             self.db.execute("ALTER TABLE smartstore_erp_rows ADD COLUMN amount_split_confirmed INTEGER NOT NULL DEFAULT 0")
         self.seed_item_names()
+        self.backfill_legacy_smartstore_matches()
         self.confirm_existing_smartstore_matches()
         self.db.commit()
         self.ensure_local_transition_backup()
@@ -238,6 +239,58 @@ class Operations(TrackingOperations, VoucherOperations):
                 )
                 confirmed+=1
         return confirmed
+
+    @staticmethod
+    def _smartstore_amounts_match(data, components, issue=''):
+        if issue or not components:
+            return False
+        try:
+            actual=sum((money(item.get('amount',0)) for item in components),Decimal('0'))
+            expected=money(data.get('amount',data.get('total_amount',0)))
+        except (TypeError, ValueError):
+            return False
+        return actual == expected
+
+    def backfill_legacy_smartstore_matches(self):
+        """Apply the bundled Sales composition/price rules to old unmatched rows."""
+        rows=self.db.execute('''
+            SELECT id,data FROM smartstore_erp_rows
+            WHERE erp_id IS NULL AND (components='[]' OR components='')
+            ORDER BY rowid
+        ''').fetchall()
+        matched=0
+        for row in rows:
+            try:
+                data=json.loads(row['data'])
+            except (TypeError,json.JSONDecodeError):
+                continue
+            components,issue=self._erp_source_components(data)
+            if not components or issue:
+                continue
+            confirmed=int(self._smartstore_amounts_match(data,components,issue))
+            self.db.execute('''UPDATE smartstore_erp_rows
+                SET components=?,issue='',amount_split_confirmed=? WHERE id=?''',
+                (encode(components),confirmed,row['id']))
+            matched+=1
+        if matched:
+            # Remember successful legacy allocations in FLOW's shared, colour-family
+            # voucher namespace so the web client and other workers can reuse them.
+            self.remember_confirmed_smartstore_splits()
+            self.event('기존 전표 규칙 연결',f'스마트스토어 미매칭 {matched}건 자동 연결')
+        return matched
+
+    def remember_confirmed_smartstore_splits(self):
+        learned=0
+        for voucher_row in self.voucher_rows('0001-01-01','9999-12-31'):
+            if voucher_row['kind']!='smartstore' or not voucher_row['confirmed']:
+                continue
+            key=self.voucher_rule_key(voucher_row,voucher_row['total'])
+            before=self.db.execute('SELECT components FROM mappings WHERE key=?',(key,)).fetchone() if key else None
+            self.remember_voucher_split(voucher_row)
+            after=self.db.execute('SELECT components FROM mappings WHERE key=?',(key,)).fetchone() if key else None
+            if (before[0] if before else None)!=(after[0] if after else None):
+                learned+=1
+        return learned
 
     def item_name(self, code, fallback=''):
         code=identifier(code)
@@ -1310,7 +1363,10 @@ class Operations(TrackingOperations, VoucherOperations):
         if custom:
             components, issue = self._build_components(lookup, json.loads(custom[0]))
             return components, issue
-        return [], '스마트스토어 주문 또는 저장된 상품·세트 매칭을 찾지 못했습니다.'
+        # REQM-Sales composition and amount rules are bundled in the FLOW
+        # reference catalog.  SmartStore used to bypass them and only inspect
+        # manually saved FLOW mappings, leaving otherwise known products empty.
+        return self._erp_source_components(lookup)
 
     @staticmethod
     def _smartstore_rows_match(left, right):
@@ -1378,8 +1434,10 @@ class Operations(TrackingOperations, VoucherOperations):
                         issue='' if components else '부속품 금액이 주문 금액을 초과합니다.'
                     else:
                         components,issue=self._smartstore_erp_components(merged)
-                    self.db.execute('UPDATE smartstore_erp_rows SET day=?,data=?,components=?,issue=? WHERE id=?',(
-                        payment_day(merged),encode(merged),encode(components),issue,purchase_target['id'],
+                    confirmed=int(self._smartstore_amounts_match(merged,components,issue))
+                    self.db.execute('''UPDATE smartstore_erp_rows
+                        SET day=?,data=?,components=?,issue=?,amount_split_confirmed=? WHERE id=?''',(
+                        payment_day(merged),encode(merged),encode(components),issue,confirmed,purchase_target['id'],
                     ))
                     added += 1
                     continue
@@ -1387,11 +1445,15 @@ class Operations(TrackingOperations, VoucherOperations):
                 data['_purchase_confirmed']=False
                 data['_purchase_only']=False
                 components, issue = self._smartstore_erp_components(data)
+                confirmed=int(self._smartstore_amounts_match(data,components,issue))
                 self.db.execute('''INSERT INTO smartstore_erp_rows
-                    (id,identity,day,data,components,erp_id,issue) VALUES(?,?,?,?,?,?,?)''',
-                    (uuid.uuid4().hex,identity,paid_on,encode(data),encode(components),None,issue))
+                    (id,identity,day,data,components,erp_id,issue,amount_split_confirmed)
+                    VALUES(?,?,?,?,?,?,?,?)''',
+                    (uuid.uuid4().hex,identity,paid_on,encode(data),encode(components),None,issue,confirmed))
                 added += 1
-            self.event('스마트스토어 ERP 원본 반영',f'신규 {added}, 중복 {duplicates}, 원본 결제일 기준')
+            learned=self.remember_confirmed_smartstore_splits() if added else 0
+            self.event('스마트스토어 ERP 원본 반영',
+                       f'신규 {added}, 중복 {duplicates}, 금액 규칙 {learned}, 원본 결제일 기준')
         return added, duplicates
 
     def import_smartstore_purchase(self, path, on):
@@ -1427,23 +1489,29 @@ class Operations(TrackingOperations, VoucherOperations):
                     else:
                         components,issue=self._smartstore_erp_components(merged)
                     row_id=target['id']
-                    self.db.execute('UPDATE smartstore_erp_rows SET day=?,data=?,components=?,issue=? WHERE id=?',(
-                        payment_day(merged),encode(merged),encode(components),issue,row_id,
+                    confirmed=int(self._smartstore_amounts_match(merged,components,issue))
+                    self.db.execute('''UPDATE smartstore_erp_rows
+                        SET day=?,data=?,components=?,issue=?,amount_split_confirmed=? WHERE id=?''',(
+                        payment_day(merged),encode(merged),encode(components),issue,confirmed,row_id,
                     ))
                 else:
                     data.update(_purchase_confirmed=True,_purchase_only=True)
                     components,issue=self._smartstore_erp_components(data)
                     row_id=uuid.uuid4().hex
                     row_identity=hashlib.sha256(('purchase:'+identity).encode('utf-8')).hexdigest()
+                    confirmed=int(self._smartstore_amounts_match(data,components,issue))
                     self.db.execute('''INSERT INTO smartstore_erp_rows
-                        (id,identity,day,data,components,erp_id,issue) VALUES(?,?,?,?,?,?,?)''',(
-                        row_id,row_identity,paid_on,encode(data),encode(components),None,issue,
+                        (id,identity,day,data,components,erp_id,issue,amount_split_confirmed)
+                        VALUES(?,?,?,?,?,?,?,?)''',(
+                        row_id,row_identity,paid_on,encode(data),encode(components),None,issue,confirmed,
                     ))
                 self.db.execute('INSERT INTO smartstore_purchase_rows VALUES(?,?,?,?,?)',(
                     uuid.uuid4().hex,identity,paid_on,encode(data),row_id,
                 ))
                 added += 1
-            self.event('스마트스토어 구매확정 원본 반영',f'신규 {added}, 중복 {duplicates}, 원본 결제일 기준')
+            learned=self.remember_confirmed_smartstore_splits() if added else 0
+            self.event('스마트스토어 구매확정 원본 반영',
+                       f'신규 {added}, 중복 {duplicates}, 금액 규칙 {learned}, 원본 결제일 기준')
         return added,duplicates
 
     def _erp_source_components(self, data):
@@ -1458,8 +1526,22 @@ class Operations(TrackingOperations, VoucherOperations):
             data.get('product',''), data.get('option',''), Decimal(data['quantity']),
             number(data['amount']), include_shipping=False,
         )
+        catalog=self.conversion_catalog(catalog_channel)
+        mapping_key=(catalog_channel,order.normalized_source)
+        # Some historical Sales rows have a confirmed amount rule but no
+        # separate product-mapping row. The price rule already contains the
+        # authoritative FLOW item codes and quantities, so expose it as the
+        # composition for this conversion instead of discarding it.
+        if mapping_key not in catalog.mappings:
+            templates=catalog.price_templates.get(mapping_key,[])
+            if templates:
+                template=min(templates,key=lambda row:abs(row['total_unit_price']-order.unit_total))
+                catalog.mappings[mapping_key]={
+                    'mapping_type':'set','components':template['components'],
+                    'review_status':'confirmed','is_active':True,
+                }
         converted = convert_orders(
-            [order], self.conversion_catalog(catalog_channel), channel_name=catalog_channel,
+            [order], catalog, channel_name=catalog_channel,
             default_warehouse=self.settings['warehouse'],
         )
         if converted.issues or not converted.is_reconciled:

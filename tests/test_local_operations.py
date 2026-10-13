@@ -78,6 +78,34 @@ class LocalTests(unittest.TestCase):
         repriced=Operations._reprice_components(multi,'50000',1)
         self.assertEqual([item['amount'] for item in repriced],['36200','6900','6900'])
 
+    def test_existing_sales_rules_backfill_smartstore_components_and_amounts(self):
+        data={
+            'channel':'리큐엠_스마트스토어','account':'기본','order_no':'LEGACY-1',
+            'product':'QP2000C',
+            'option':'색상: 블랙 / 세트/단품: 애플고속세트 / 구성품: 60W C to 8핀+30W어댑터(그레이)',
+            'quantity':'1','amount':'63800','shipping':'0',
+        }
+        with self.s.db:
+            self.s.db.execute('''INSERT INTO smartstore_erp_rows
+                (id,identity,day,data,components,erp_id,issue,amount_split_confirmed)
+                VALUES(?,?,?,?,?,?,?,?)''',(
+                'legacy-rule-row','legacy-rule-row','2026-10-13',encode(data),'[]',None,
+                '스마트스토어 주문 또는 저장된 상품·세트 매칭을 찾지 못했습니다.',0,
+            ))
+        self.s.close()
+        self.s=Operations(self.folder/'data',REFERENCE)
+        row=self.s.db.execute('''SELECT components,issue,amount_split_confirmed
+            FROM smartstore_erp_rows WHERE id=?''',('legacy-rule-row',)).fetchone()
+        components=json.loads(row['components'])
+        self.assertEqual({item['code']:Decimal(item['amount']) for item in components},{
+            '[RQM]-QP2000C1-BK':Decimal('36900'),'RQM-MFICA150-CS':Decimal('14500'),
+            'QPD-330_SGY':Decimal('12400'),
+        })
+        self.assertEqual((row['issue'],row['amount_split_confirmed']),('',1))
+        self.assertGreater(self.s.db.execute(
+            "SELECT COUNT(*) FROM mappings WHERE key LIKE 'voucher:v1:%'"
+        ).fetchone()[0],0)
+
     def test_tree_sort_values_handle_numbers_and_text(self):
         self.assertLess(tree_sort_value('2'),tree_sort_value('10'))
         self.assertEqual(tree_sort_value('상품 A'),tree_sort_value('상품 a'))
