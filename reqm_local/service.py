@@ -1042,6 +1042,9 @@ class Operations(TrackingOperations):
             self.event('배송정보 수정', order_id)
 
     def _artifact(self, artifact_id, kind, on, content, path):
+        if path is None:
+            self.db.execute('INSERT INTO artifacts(id,kind,day,content) VALUES(?,?,?,?)', (artifact_id, kind, on, content))
+            return
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(suffix='.xlsx', dir=target.parent)
@@ -1054,7 +1057,7 @@ class Operations(TrackingOperations):
             if os.path.exists(temporary):
                 os.unlink(temporary)
 
-    def request(self, ids, on, path, excluded_channels=None, warehouse=None):
+    def request(self, ids, on, path=None, excluded_channels=None, warehouse=None):
         on = day(on)
         selected = [o for o in self.orders() if o['id'] in ids]
         if not selected or len(selected) != len(set(ids)):
@@ -1095,6 +1098,8 @@ class Operations(TrackingOperations):
                 self.db.execute("UPDATE orders SET state='출고 요청' WHERE id=?", (order['id'],))
             content = wekeep_workbook_bytes(rows) if request_format == 'wekeep' else workbook_bytes(headers, rows, '출고요청')
             self._artifact(batch, '출고요청', on, content, path)
+            if request_format == 'wekeep':
+                self.register_request_tracking(batch)
             self.event('출고요청 파일 생성', batch)
         return batch
 

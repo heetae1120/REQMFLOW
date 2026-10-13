@@ -164,9 +164,10 @@ class WorkspaceSyncTests(unittest.TestCase):
             self.client.row['version'] += 1
             return str(Path(self.temp.name) / 'should-not-exist.xlsx')
         app.save_path = choose_path
-        with patch.object(self.service, 'request') as export, patch('reqm_local.desktop.messagebox.showinfo'):
+        with patch.object(self.service, 'request') as export, patch('reqm_local.desktop.messagebox.askyesno',return_value=False):
             app.request()
         export.assert_called_once()
+        self.assertIsNone(export.call_args.args[2])
 
 
 if __name__ == '__main__':

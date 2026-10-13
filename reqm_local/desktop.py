@@ -35,7 +35,7 @@ from .shipping import compact
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.35'
+APP_VERSION = '1.9.36'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -374,7 +374,7 @@ class Desktop:
         result_tabs.add(amount_frame,text='2  금액 매칭 및 세트 분리')
         result_tabs.add(esm_frame,text='2-1  옥션/지마켓 ERP전환')
         result_tabs.add(erp_frame,text='3  ERP 파일 생성 및 다운로드')
-        tracking_frame = ttk.Frame(result_tabs,padding=20)
+        tracking_frame = ttk.Frame(result_tabs,padding=8)
         result_tabs.add(tracking_frame,text='4  위킵 송장 가져오기')
         from .tracking_ui import TrackingPanel
         self.tracking_panel = TrackingPanel(self,tracking_frame)
@@ -1725,14 +1725,14 @@ class Desktop:
         if not self.preflight_review(ids,show_success=False):return
         if not self.confirm_request_review(ids):return
         warehouse_suffix='' if warehouse=='전체창고' else '_'+warehouse.split(' ',1)[0]
-        path=self.save_path('출고요청_'+self.today.get()+warehouse_suffix+'.xlsx')
-        if path:
-            batch=self.service.request(
-                ids,self.today.get(),path,excluded_channels=self.request_excluded_channels,warehouse=warehouse,
-            ); self.refresh()
-            excluded=len(selected)-len(ids)
-            suffix=f'\n선택 조건에서 제외된 주문 {excluded:,}건은 포함하지 않았습니다.' if excluded else ''
-            messagebox.showinfo('파일 생성',f'{batch}\n{warehouse} 출고요청 파일을 저장했습니다. 물류사 양식을 확인한 뒤 전달하세요.{suffix}')
+        batch=self.service.request(
+            ids,self.today.get(),None,excluded_channels=self.request_excluded_channels,warehouse=warehouse,
+        )
+        if hasattr(self,'tracking_panel'):self.tracking_panel.day.set(self.today.get())
+        self.refresh()
+        if messagebox.askyesno('출고요청 저장 완료','FLOW에 출고요청과 B2C 송장 대상을 저장했습니다.\n지금 위킵 양식을 다운로드할까요?\n나중에 실제출고의 위킵 송장 화면에서도 받을 수 있습니다.',parent=self.root):
+            path=self.save_path('출고요청_'+self.today.get()+warehouse_suffix+'.xlsx')
+            if path:self.service.reexport(batch,path)
 
     def result_template(self):
         path=self.save_path('위킵_출고결과_양식.xlsx')

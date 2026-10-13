@@ -6,6 +6,7 @@ import getpass
 import json
 import uuid
 import tempfile
+from contextlib import nullcontext
 from datetime import date, datetime
 from pathlib import Path
 
@@ -72,10 +73,151 @@ class TrackingOperations:
             id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES tracking_jobs(id),
             from_day TEXT NOT NULL, through_day TEXT NOT NULL, remote_rows TEXT NOT NULL,
             queried_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS tracking_sources(
+            job_id TEXT NOT NULL REFERENCES tracking_jobs(id), name TEXT NOT NULL,
+            content BLOB NOT NULL, PRIMARY KEY(job_id,name));
         ''')
 
     def tracking_actor(self):
         return self.settings.get('cloud_email') or getpass.getuser()
+
+    def register_request_tracking(self, batch):
+        """Register the generated WeKeep rows using direct order/line identities."""
+        key='request:'+batch
+        if self.db.execute('SELECT 1 FROM tracking_jobs WHERE identity=?',(key,)).fetchone():
+            return
+        artifact=self.db.execute("SELECT * FROM artifacts WHERE id=? AND kind='출고요청'",(batch,)).fetchone()
+        if not artifact:
+            return
+        from .files import WEKEEP_REQUEST_COLUMNS
+        import io
+        from openpyxl import load_workbook
+        book=load_workbook(io.BytesIO(artifact['content']),read_only=True)
+        headers=[str(c.value or '') for c in next(book.active.iter_rows())]
+        book.close()
+        if headers != WEKEEP_REQUEST_COLUMNS:
+            return
+        lines=self.db.execute('''SELECT r.*,o.data,o.components FROM request_lines r
+            JOIN orders o ON o.id=r.order_id WHERE r.request_id=? ORDER BY r.rowid''',(batch,)).fetchall()
+        if not lines:
+            return
+        self.db.execute('INSERT INTO tracking_jobs VALUES(?,?,?,?,?,?,?,?)',
+            (batch,key,artifact['day'],'b2c',batch+'.xlsx',artifact['content'],self.tracking_actor(),now()))
+        source_cache={}
+        for line in lines:
+            original=json.loads(line['data'])
+            component=json.loads(line['components'])[line['component']]
+            data={**original,'product':component['name'],'quantity':str(line['qty']),
+                  '_request_line_id':line['id'],'_original_data':original}
+            self.db.execute('INSERT INTO tracking_rows(id,job_id,order_id,data,state) VALUES(?,?,?,?,?)',
+                (uuid.uuid4().hex,batch,line['order_id'],encode(data),'pending'))
+            name=original.get('source_file','')
+            source=self.db.execute('SELECT content FROM source_files WHERE name=?',(name,)).fetchone()
+            if source:
+                if name not in source_cache:
+                    try:
+                        with tempfile.TemporaryDirectory(prefix='reqm-source-check-') as folder:
+                            path=Path(folder)/Path(name).name;path.write_bytes(source['content'])
+                            source_cache[name]=parse_tracking_orders(path,self.settings['profiles'],channel_override=original.get('channel'))
+                    except (ValueError,KeyError):
+                        source_cache[name]=[]
+                candidates=[r for r in source_cache[name] if r.get('source_row')==original.get('source_row') and
+                    all(identity(r.get(k))==identity(original.get(k)) for k in ('order_no','line_no','product','option','quantity')) and delivery_key(r)==delivery_key(original)]
+                if len(candidates)==1 and delivery_key(original) is not None:
+                    self.db.execute('INSERT OR IGNORE INTO tracking_sources VALUES(?,?,?)',(batch,name,source['content']))
+
+    def daily_b2c_jobs(self,on):
+        """Backfill existing generated requests; hide cancelled request lines."""
+        on=valid_day(on)
+        with self.db:
+            for row in self.db.execute('SELECT id FROM requests WHERE day=?',(on,)).fetchall():
+                self.register_request_tracking(row['id'])
+        jobs=[j for j in self.tracking_jobs(on) if j['kind']=='b2c' and self.active_tracking_rows(j['id'])]
+        linked={r['order_id'] for j in jobs if j['identity'].startswith('request:') for r in self.active_tracking_rows(j['id'])}
+        return [j for j in jobs if j['identity'].startswith('request:') or
+                not all(r['order_id'] and r['order_id'] in linked for r in self.active_tracking_rows(j['id']))]
+
+    def active_tracking_rows(self,job_id):
+        return [r for r in self.tracking_rows(job_id) if not r['data'].get('_request_line_id') or
+                self.db.execute('SELECT 1 FROM request_lines WHERE id=?',(r['data']['_request_line_id'],)).fetchone()]
+
+    def apply_daily_tracking(self,job_ids,remote_rows,start,end,expected=None):
+        if valid_day(start)>valid_day(end):
+            raise ValueError('위킵 등록일 범위를 확인하세요.')
+        jobs=list(dict.fromkeys(job_ids))
+        if not jobs:
+            raise ValueError('조회할 B2C 출고요청이 없습니다.')
+        for job in jobs:
+            kind=self.db.execute('SELECT kind FROM tracking_jobs WHERE id=?',(job,)).fetchone()
+            if not kind or kind['kind']!='b2c':
+                raise ValueError('B2C 작업만 일괄 조회할 수 있습니다.')
+            if expected is not None and encode(self.active_tracking_rows(job))!=expected.get(job):
+                raise ValueError('조회 중 출고요청이 변경되었습니다. 다시 조회하세요.')
+        # Compare across jobs together so duplicate seller order numbers are visible.
+        entries=[r for job in jobs for r in self.active_tracking_rows(job)]
+        results=reconcile([r['data'] for r in entries],remote_rows)
+        stamp=now()
+        with self.db:
+            for job in jobs:
+                self.db.execute('INSERT INTO tracking_queries VALUES(?,?,?,?,?,?)',
+                    (uuid.uuid4().hex,job,valid_day(start),valid_day(end),encode(remote_rows),stamp))
+            for entry,result in zip(entries,results):
+                if entry['state']=='confirmed':
+                    reason=entry['reason'] if result['state']=='matched' and result['tracking']==entry['tracking'] else '확정 송장 유지 · 재조회 결과 확인 필요: '+result['reason']
+                    self.db.execute('UPDATE tracking_rows SET evidence=?,queried_at=?,reason=? WHERE id=?',
+                        (encode(result['candidates']),stamp,reason,entry['id']))
+                    continue
+                self.db.execute('UPDATE tracking_rows SET state=?,tracking=?,reason=?,evidence=?,queried_at=? WHERE id=?',
+                    (result['state'],result['tracking'],result['reason'],encode(result['candidates']),stamp,entry['id']))
+            for job in jobs:
+                ids=[r['id'] for r in self.active_tracking_rows(job) if r['state']=='matched']
+                if ids:
+                    self.confirm_tracking(job,ids,_manage_transaction=False)
+            self.event('B2C 일괄 송장 반영',f'{len(jobs)}개 작업, 원격 {len(remote_rows)}행')
+
+    def export_wekeep_jobs(self,job_ids,path,with_tracking=False,confirmed_only=False):
+        from .files import wekeep_workbook_bytes
+        entries=[r for job in dict.fromkeys(job_ids) for r in self.active_tracking_rows(job)]
+        if confirmed_only:
+            entries=[r for r in entries if r['state']=='confirmed']
+        if not entries:
+            raise ValueError('다운로드할 출고요청이 없습니다.')
+        values=[]
+        for row in entries:
+            d=row['data']
+            values.append([identity(d.get(k)).removeprefix('리큐엠_') if k=='channel' else identity(d.get(k)) for k in ('order_no','channel','product','quantity','recipient','phone','postcode','address','memo')]+
+                [row['tracking'] if with_tracking and row['state']=='confirmed' else ''])
+        Path(path).write_bytes(wekeep_workbook_bytes(values))
+
+    def export_daily_sources(self,job_ids,path):
+        """Export original seller files with invoices, without changing their columns."""
+        import zipfile,io
+        grouped={}
+        for job in dict.fromkeys(job_ids):
+            for row in self.active_tracking_rows(job):
+                if row['state']!='confirmed':
+                    continue
+                original=row['data'].get('_original_data',row['data'])
+                name=original.get('source_file','')
+                source=self.db.execute('SELECT content FROM tracking_sources WHERE job_id=? AND name=?',(job,name)).fetchone()
+                if not source:
+                    raise ValueError('판매처 원본을 찾지 못했습니다. 기존 작업은 원본 파일을 다시 연결하세요.')
+                digest=hashlib.sha256(source['content']).hexdigest()
+                group=grouped.setdefault((name,digest),{'content':source['content'],'rows':{}})
+                index=int(original['source_row'])
+                old=group['rows'].get(index)
+                if old and old['tracking']!=row['tracking']:
+                    raise ValueError('한 판매처 원본 행에 여러 송장이 있습니다. 수동 확인하세요.')
+                group['rows'][index]={'data':original,'tracking':row['tracking']}
+        if not grouped:
+            raise ValueError('송장이 반영된 판매처 주문이 없습니다.')
+        buffer=io.BytesIO()
+        with zipfile.ZipFile(buffer,'w',zipfile.ZIP_DEFLATED) as archive:
+            for index,((name,_),group) in enumerate(grouped.items(),1):
+                original=Path(name)
+                content=self._update_source_workbook(name,group['content'],list(group['rows'].values()))
+                archive.writestr(f'{index:02d}_{original.stem}_송장반영{original.suffix}',content)
+        Path(path).write_bytes(buffer.getvalue())
 
     def import_tracking_files(self, paths, on, kind='b2c', channel_override=None):
         on = valid_day(on)
@@ -104,6 +246,7 @@ class TrackingOperations:
                 job = uuid.uuid4().hex
                 self.db.execute('INSERT INTO tracking_jobs VALUES(?,?,?,?,?,?,?,?)',
                                 (job, key, on, kind, name, content, self.tracking_actor(), now()))
+                self.db.execute('INSERT INTO tracking_sources VALUES(?,?,?)',(job,name,content))
                 for data in rows:
                     matches = [oid for oid, old in existing_orders if
                                all(identity(data.get(k)) == identity(old.get(k)) for k in ('channel', 'account', 'order_no'))
@@ -186,7 +329,7 @@ class TrackingOperations:
                                  encode(result['candidates']), stamp, entry['id']))
             self.event('위킵 송장 조회', f'작업 {job_id}, 등록일 {start}~{end}, 원격 {len(remote_rows)}행')
 
-    def confirm_tracking(self, job_id, row_ids, manual=None, reason=''):
+    def confirm_tracking(self, job_id, row_ids, manual=None, reason='', *, _manage_transaction=True):
         entries = {r['id']: r for r in self.tracking_rows(job_id)}
         row_ids = list(dict.fromkeys(row_ids))
         if not row_ids or any(rid not in entries for rid in row_ids):
@@ -200,7 +343,7 @@ class TrackingOperations:
                 raise ValueError('자동 매칭 완료 주문만 확정할 수 있습니다. 검토 주문은 수동 연결하세요.')
             if row['state'] == 'confirmed' and value and value != row['tracking']:
                 raise ValueError('이미 확정된 송장은 변경할 수 없습니다. 기존 출고정보를 확인하세요.')
-        with self.db:
+        with self.db if _manage_transaction else nullcontext():
             for rid in row_ids:
                 row = entries[rid]
                 tracking = value or row['tracking']

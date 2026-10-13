@@ -95,7 +95,7 @@ def run(folder):
         assert tracked['state']=='matched'
         shipment_count=service.db.execute('SELECT COUNT(*) FROM shipments').fetchone()[0]
         service.confirm_tracking(job,[tracked['id']])
-        service.export_tracking_day('2026-10-01',folder/'demo-tracking.xlsx')
+        service.export_tracking_day('2026-10-01',folder/'demo-tracking.xlsx',confirmed_only=True)
         from openpyxl import load_workbook
         book=load_workbook(folder/'demo-tracking.xlsx')
         assert book.active['J2'].value=='001234567890' and book.active['J2'].data_type=='s'

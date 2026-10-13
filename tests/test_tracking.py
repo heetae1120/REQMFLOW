@@ -228,7 +228,7 @@ class TrackingStoreTests(unittest.TestCase):
         self.assertEqual(book.active.cell(2, 12).value, REMOTE['tracking'])
         book.close()
         state = export_workspace(self.s)
-        self.assertEqual(state['schema_version'], 8)
+        self.assertEqual(state['schema_version'], 9)
         import_workspace(self.s, state)
         self.assertEqual(workspace_digest(export_workspace(self.s)), workspace_digest(state))
 
