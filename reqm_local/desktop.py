@@ -23,7 +23,7 @@ from .files import (
 )
 from .service import Operations
 from .ui_helpers import (
-    autosize_tree, bind_desktop_drag, bind_tree_sorting, bind_wide_combobox, filter_combobox_choices,
+    autosize_tree, bind_desktop_drag, bind_tree_sorting, bind_tree_column_resize, bind_wide_combobox, filter_combobox_choices,
     post_combobox, search_suggestions,
 )
 from .profiles import (
@@ -35,7 +35,7 @@ from .shipping import compact
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.30'
+APP_VERSION = '1.9.31'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -142,11 +142,13 @@ class Desktop:
         style.configure('Quiet.TButton', background='#F8FAFC', foreground='#475569', bordercolor='#E2E8F0')
         style.configure('Danger.TButton', background='#FFF7F7', foreground='#B42318', bordercolor='#FECACA')
         style.map('Danger.TButton', background=[('active','#FEE2E2')])
-        style.configure('Channel.TButton', padding=(9,7), background='#FFFFFF', foreground='#334155', bordercolor='#E2E8F0', relief='flat')
-        style.configure('Complete.Channel.TButton', padding=(9,7), background='#ECFDF3', foreground='#067647', bordercolor='#A6F4C5', relief='flat')
+        style.configure('Channel.TButton', padding=(9,3), background='#FFFFFF', foreground='#334155', bordercolor='#E2E8F0', relief='flat')
+        style.configure('Complete.Channel.TButton', padding=(9,3), background='#ECFDF3', foreground='#067647', bordercolor='#A6F4C5', relief='flat')
         style.map('Complete.Channel.TButton', background=[('active','#D1FADF')])
-        style.configure('Visible.Eye.TButton', padding=(5,7), background='#ECFDF3', foreground='#047857', bordercolor='#A6F4C5', relief='flat')
-        style.configure('Hidden.Eye.TButton', padding=(5,7), background='#F1F5F9', foreground='#94A3B8', bordercolor='#E2E8F0', relief='flat')
+        style.configure('Visible.Eye.TButton', padding=(5,3), background='#ECFDF3', foreground='#047857', bordercolor='#A6F4C5', relief='flat')
+        style.configure('Hidden.Eye.TButton', padding=(5,3), background='#F1F5F9', foreground='#94A3B8', bordercolor='#E2E8F0', relief='flat')
+        for compact_style in ('Compact.TButton','Compact.Accent.TButton','Compact.Quiet.TButton','Compact.Danger.TButton'):
+            style.configure(compact_style,padding=(7,4),font=(f,9),width=0)
         style.configure('Treeview', rowheight=34, font=(f,10), background='white', fieldbackground='white', foreground='#172033', bordercolor='#E2E8F0', relief='flat')
         style.configure('Treeview.Heading', font=(f,10,'bold'), background='#F1F5F9', foreground='#334155', bordercolor='#E2E8F0', relief='flat', padding=(8,8))
         style.map('Treeview', background=[('selected','#2563EB')], foreground=[('selected','white')])
@@ -237,13 +239,18 @@ class Desktop:
             self.nav_buttons.append(button)
         select_page(0)
         self.build_matching_settings(matching_frame)
-        channels = ttk.LabelFrame(self.order_frame,text='판매처 주문 파일',padding=(12,8))
-        channels.pack(fill='x',pady=(0,10))
+        channels = ttk.LabelFrame(self.order_frame,text='판매처 주문 파일',padding=(8,4))
+        channels.pack(fill='x',pady=(0,5))
         channel_day = ttk.Frame(channels)
-        channel_day.grid(row=0,column=0,columnspan=6,sticky='ew',padx=4,pady=(0,7))
+        channel_day.grid(row=0,column=0,columnspan=6,sticky='ew',padx=4,pady=(0,3))
         ttk.Label(channel_day,text='작업일',font=(self.font_family,10,'bold')).pack(side='left')
         self.date_picker(channel_day,self.order_day,'주문 등록·출고 조회일').pack(side='left',padx=6)
         ttk.Label(channel_day,text='선택 날짜에 등록했거나 출고한 주문만 표시됩니다.',foreground='#64748B').pack(side='left',padx=10)
+        self.channels_expanded = True
+        self.channel_toggle = ttk.Button(channel_day,text='판매처 접기 ▴',style='Compact.TButton',command=self.toggle_channel_panel)
+        self.channel_toggle.pack(side='right',padx=4)
+        self.channel_grid = ttk.Frame(channels)
+        self.channel_grid.grid(row=1,column=0,columnspan=6,sticky='ew')
         self.channel_status = {}
         self.channel_visibility = {channel:True for channel in SALES_CHANNELS}
         self.channel_eye_text = {}
@@ -254,8 +261,8 @@ class Desktop:
             self.channel_status[channel] = status
             eye_text=tk.StringVar(value='👁')
             self.channel_eye_text[channel]=eye_text
-            cell=ttk.Frame(channels)
-            cell.grid(row=1 + index // 6,column=index % 6,sticky='ew',padx=4,pady=4)
+            cell=ttk.Frame(self.channel_grid)
+            cell.grid(row=index // 6,column=index % 6,sticky='ew',padx=3,pady=2)
             button = ttk.Button(
                 cell, textvariable=status,
                 command=lambda selected=channel:self.safe(lambda:self.import_channel(selected)),
@@ -270,43 +277,43 @@ class Desktop:
             eye.pack(side='left',padx=(3,0))
             self.channel_eye_buttons[channel]=eye
         for column in range(6):
-            channels.columnconfigure(column,weight=1)
+            self.channel_grid.columnconfigure(column,weight=1)
         ttk.Label(
             channels,
-            text='판매처를 누르거나 아래 영역에 파일을 드래그하세요. ✓는 입력 완료, 눈 아이콘은 주문 목록 표시 여부입니다.',
+            text='판매처: 파일 입력 · ✓ 입력 완료 · 눈 아이콘: 목록 표시 · 표 제목 경계를 드래그하면 열 너비가 바뀝니다.',
             foreground='#64748B',
-        ).grid(row=1+(len(SALES_CHANNELS)+5)//6,column=0,columnspan=6,sticky='w',padx=4,pady=(7,2))
+        ).grid(row=2,column=0,columnspan=6,sticky='w',padx=4,pady=(3,0))
         self.drop_zone = tk.Label(
             self.order_frame,
             text='↓  주문 파일을 여기에 드래그하세요   ·   XLSX / XLS / CSV',
             bg='#172033', fg='#C7FF4A', font=(self.font_family,11,'bold'),
-            padx=18, pady=12, cursor='hand2',
+            padx=12, pady=5, cursor='hand2',
         )
-        self.drop_zone.pack(fill='x',pady=(0,10))
+        self.drop_zone.pack(fill='x',pady=(0,5))
         self.drop_zone.bind('<Button-1>',lambda _event:self.safe(self.import_files))
         self.setup_file_drop(self.drop_zone)
         workflow = ttk.Frame(self.order_frame)
-        workflow.pack(fill='x',pady=(0,10))
-        organize = ttk.LabelFrame(workflow,text='주문 정리',padding=(10,8))
-        organize.pack(side='left',fill='x',expand=True,padx=(0,6))
-        self.button(organize,'＋ 주문 파일 입력',self.import_files,style='Accent.TButton')
-        self.button(organize,'상품 매칭',self.mapping)
-        self.button(organize,'출하창고 입력',self.change_order_warehouse,style='Quiet.TButton')
-        self.button(organize,'미매칭 검토',self.batch_matching_review)
-        self.button(organize,'배송정보 수정',self.delivery)
-        self.button(organize,'강제 승인',self.force_shipping_approval,style='Quiet.TButton')
-        self.button(organize,'삭제',self.delete_orders,style='Danger.TButton')
-        release = ttk.LabelFrame(workflow,text='출고 파일 생성',padding=(10,8))
-        release.pack(side='left',fill='x',padx=(6,0))
-        ttk.Label(release,text='요청일').pack(side='left',padx=(0,4))
+        workflow.pack(fill='x',pady=(0,5))
+        organize = ttk.Frame(workflow,padding=(2,1))
+        organize.pack(fill='x',pady=(0,2))
+        self.compact_button(organize,'＋ 주문 파일 입력',self.import_files,style='Accent.TButton')
+        self.compact_button(organize,'상품 매칭',self.mapping)
+        self.compact_button(organize,'출하창고 입력',self.change_order_warehouse,style='Quiet.TButton')
+        self.compact_button(organize,'미매칭 검토',self.batch_matching_review)
+        self.compact_button(organize,'배송정보 수정',self.delivery)
+        self.compact_button(organize,'강제 승인',self.force_shipping_approval,style='Quiet.TButton')
+        self.compact_button(organize,'삭제',self.delete_orders,style='Danger.TButton')
+        release = ttk.Frame(workflow,padding=(2,1))
+        release.pack(fill='x')
+        ttk.Label(release,text='출고요청일').pack(side='left',padx=(0,4))
         ttk.Entry(release,textvariable=self.today,width=11).pack(side='left')
         ttk.Combobox(
             release,textvariable=self.request_warehouse,
             values=['전체창고','100 본사창고','300 위킵창고'],state='readonly',width=14,
         ).pack(side='left',padx=4)
-        ttk.Button(release,textvariable=self.request_exclusion_text,command=lambda:self.safe(lambda:self.choose_channel_exclusions('request'))).pack(side='left',padx=4)
-        self.button(release,'사전검사',self.preflight_review,style='Quiet.TButton')
-        self.button(release,'선택 주문 파일 생성',self.request,style='Accent.TButton')
+        ttk.Button(release,style='Compact.TButton',textvariable=self.request_exclusion_text,command=lambda:self.safe(lambda:self.choose_channel_exclusions('request'))).pack(side='left',padx=4)
+        self.compact_button(release,'사전검사',self.preflight_review,style='Quiet.TButton')
+        self.compact_button(release,'선택 주문 파일 생성',self.request,style='Accent.TButton')
         self.search = tk.StringVar()
         self.filter = tk.StringVar(value='전체')
         self.unmatched_first = tk.BooleanVar(value=False)
@@ -314,25 +321,32 @@ class Desktop:
         self.hide_completed_text = tk.StringVar(value='출고 완료건 제외 · 꺼짐')
         self.order_counts = tk.StringVar(value='전체 0건 · 미매칭 0건')
         filters = ttk.Frame(self.order_frame)
-        filters.pack(fill='x',pady=(0,8))
+        filters.pack(fill='x',pady=(0,3))
         ttk.Label(filters,text='주문 검색',font=(self.font_family,10,'bold')).pack(side='left')
-        ttk.Entry(filters,textvariable=self.search,width=38).pack(side='left',padx=8)
+        ttk.Entry(filters,textvariable=self.search,width=26).pack(side='left',padx=8)
         ttk.Label(filters,textvariable=self.order_counts,foreground='#475569',font=(self.font_family,9,'bold')).pack(side='left',padx=(0,10))
         ttk.Combobox(filters,textvariable=self.filter,values=['전체','중복 주문','검토 필요','출고 준비','출고 요청','부분 출고','출고 완료'],state='readonly',width=14).pack(side='left')
         ttk.Checkbutton(filters,text='미매칭 상단',variable=self.unmatched_first,command=self.refresh_orders).pack(side='left',padx=(8,0))
-        self.button(filters,'출고 준비 전체 선택',self.select_ready,style='Quiet.TButton')
-        ttk.Button(filters,textvariable=self.hide_completed_text,command=self.toggle_completed_orders,style='Quiet.TButton').pack(side='left',padx=(4,0))
+        self.compact_button(filters,'출고 준비 전체 선택',self.select_ready,style='Quiet.TButton')
+        ttk.Button(filters,textvariable=self.hide_completed_text,command=self.toggle_completed_orders,style='Compact.Quiet.TButton').pack(side='left',padx=(4,0))
         self.search.trace_add('write',self.on_search_changed)
         self.filter.trace_add('write',lambda *_:self.refresh_orders())
         self.search_suggestion_bar = ttk.Frame(self.order_frame)
         self.search_suggestion_bar.pack(fill='x',padx=(44,0),pady=(0,4))
         self.detail = tk.StringVar(value='주문을 선택하면 구성품을 확인할 수 있습니다. Ctrl/Shift로 여러 주문을 선택하세요.')
-        ttk.Label(self.order_frame,textvariable=self.detail,wraplength=1200,padding=(8,6),foreground='#64748B').pack(fill='x')
+        ttk.Label(self.order_frame,textvariable=self.detail,wraplength=1200,padding=(4,2),foreground='#64748B').pack(fill='x')
         self.table = self.tree(
             self.order_frame,
             ['판매처','주문번호','이름','주소','연락처','상품명','매칭품목','출하창고','진행상태','작업구분'],
             [125,155,110,330,135,300,280,110,95,120],
         )
+        self.table._reqm_minimum_widths=dict(zip(self.table['columns'],[110,150,90,280,125,260,240,110,95,100]))
+        layout_path=self.service.folder/'order_table_layout.json'
+        try:
+            saved=json.loads(layout_path.read_text(encoding='utf-8'))
+            if not isinstance(saved,dict):saved={}
+        except (OSError,ValueError):saved={}
+        bind_tree_column_resize(self.table,saved,self.save_order_column_widths)
         self.order_day.trace_add('write',lambda *_:self.refresh_orders_for_day())
         self.table.tag_configure('review',foreground='#BE123C',background='#FFF1F2')
         self.table.tag_configure('duplicate',foreground='#854D0E',background='#FEF9C3')
@@ -450,7 +464,7 @@ class Desktop:
         ttk.Label(erp_card,text='이미 생성한 출고는 제외됩니다. 배송비는 묶음 전체 출고 완료 후 한 번 반영하며, 부가세 포함·10% 과세 기준입니다.',foreground='#64748B',wraplength=1000).pack(anchor='w',pady=(16,0))
         self.history_day=tk.StringVar(value=date.today().isoformat())
         self.history_show_all=True
-        history_filters=ttk.Frame(history_frame);history_filters.pack(fill='x',pady=(0,8))
+        history_filters=ttk.Frame(history_frame);history_filters.pack(fill='x',pady=(0,3))
         self.history_search=tk.StringVar()
         ttk.Label(history_filters,text='출력일').pack(side='left',padx=(0,5))
         self.date_picker(history_filters,self.history_day,'출력 이력 날짜').pack(side='left')
@@ -482,11 +496,8 @@ class Desktop:
         item_box=ttk.LabelFrame(settings_frame,text='ERP 품목코드 · 매칭품목명 관리',padding=12)
         item_box.pack(fill='both',expand=True,pady=(16,0))
         item_actions=ttk.Frame(item_box);item_actions.pack(fill='x',pady=(0,8))
-        ttk.Label(item_actions,text='추가되는 품목의 ERP 코드와 화면에 표시할 매칭품목명을 등록합니다.',foreground='#64748B').pack(side='left')
-        self.button(item_actions,'새 품목 추가',lambda:self.edit_item_name(),style='Accent.TButton')
-        self.button(item_actions,'선택 품목 수정',self.edit_selected_item_name,style='Quiet.TButton')
+        ttk.Label(item_actions,text='출고 프로그램에서 사용 중인 품목만 표시합니다. 코드와 품목명은 출고 기준을 따릅니다.',foreground='#64748B').pack(side='left')
         self.item_name_tree=self.tree(item_box,['ERP 품목코드','매칭품목명'],[300,520])
-        self.item_name_tree.bind('<Double-1>',lambda _event:self.safe(self.edit_selected_item_name))
         tk.Label(content,text='LOCAL DATABASE   ·   날짜 YYYY-MM-DD   ·   REQM FLOW',bg='#F4F7FB',fg='#94A3B8',font=(self.font_family,8,'bold'),pady=6).pack(fill='x')
         self.refresh()
         self.root.protocol('WM_DELETE_WINDOW',self.hide_to_tray)
@@ -1087,6 +1098,26 @@ class Desktop:
         self.service.settings = settings_at(self.service.folder)
         messagebox.showinfo('매칭 설정 저장',f'{channel}의 파일명과 열 설정을 이 PC에 저장했습니다.',parent=self.root)
 
+    def toggle_channel_panel(self):
+        self.channels_expanded=not self.channels_expanded
+        if self.channels_expanded:
+            self.channel_grid.grid()
+        else:
+            self.channel_grid.grid_remove()
+        self.channel_toggle.configure(text='판매처 접기 ▴' if self.channels_expanded else '판매처 펼치기 ▾')
+
+    def save_order_column_widths(self, widths):
+        path=self.service.folder/'order_table_layout.json'
+        temporary=path.with_suffix('.json.tmp')
+        try:
+            temporary.write_text(json.dumps(widths,ensure_ascii=False),encoding='utf-8')
+            os.replace(temporary,path)
+        except OSError:
+            pass
+
+    def compact_button(self,parent,label,fn,style='TButton'):
+        self.button(parent,label,fn,style='Compact.'+style)
+
     def button(self,parent,label,fn,style='TButton'):
         ttk.Button(parent,text=label,style=style,command=lambda:self.safe(fn)).pack(side='left',padx=4)
 
@@ -1529,10 +1560,7 @@ class Desktop:
         for column,label in enumerate(labels):ttk.Label(component_box,text=label).grid(row=0,column=column,padx=3,pady=5)
         for column in (0,1,2,6):component_box.columnconfigure(column,weight=2)
         for column in (3,4,5):component_box.columnconfigure(column,weight=1)
-        catalog_choices=[]
-        for code,item in sorted(self.service.catalog.items.items()):
-            name=item.get('representative_name') or item.get('item_name') or ''
-            catalog_choices.append(f'{code} · {name}' if name else code)
+        catalog_choices=[f"{item['code']} · {item['name']}" for item in self.service.item_choices()]
         customer=self.service.channel_customer_code(data['channel'])
         customer_choices=self.service.customer_choices()
         entries=[]
@@ -1550,8 +1578,8 @@ class Desktop:
                         if field=='customer':
                             variables['customer'].set(value)
                             return
-                        variables['code'].set(value);item=self.service.catalog.items.get(value,{})
-                        variables['logistics_code'].set(value);variables['name'].set(item.get('representative_name') or item.get('item_name') or value)
+                        variables['code'].set(value)
+                        variables['logistics_code'].set(value);variables['name'].set(self.service.item_name(value))
                     def search(event,widget=widget,choices=choices):
                         if event.keysym in ('Up','Down','Left','Right','Return','Escape','Tab'):return
                         query=widget.get();cursor=widget.index('insert')

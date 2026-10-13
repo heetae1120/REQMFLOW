@@ -205,13 +205,44 @@ def autosize_tree(tree, *, minimum: int = 58, maximum: int = 420) -> None:
     font = tkfont.nametofont("TkDefaultFont")
     heading_font = tkfont.nametofont("TkHeadingFont")
     for column in tree["columns"]:
+        manual=getattr(tree,'_reqm_manual_widths',{})
+        if column in manual:
+            tree.column(column,width=manual[column],stretch=False)
+            continue
         heading = str(tree.heading(column, "text") or column)
         width = heading_font.measure(heading) + 28
         for item_id in tree.get_children(""):
             value = str(tree.set(item_id, column) or "")
             value = re.sub(r"\s+", " ", value)
             width = max(width, font.measure(value) + 24)
-        tree.column(column, width=max(minimum, min(maximum, width)), stretch=False)
+        default=getattr(tree,'_reqm_minimum_widths',{}).get(column,minimum)
+        tree.column(column, width=max(default, min(maximum, width)), stretch=False)
+
+
+def bind_tree_column_resize(tree, saved_widths=None, on_change=None):
+    """Let native heading separators resize columns without autosize undoing it."""
+    tree._reqm_manual_widths={column:max(50,int(width)) for column,width in (saved_widths or {}).items()
+                              if column in tree['columns'] and isinstance(width,int) and not isinstance(width,bool)}
+    for column,width in tree._reqm_manual_widths.items():
+        tree.column(column,width=width,stretch=False)
+    state={'before':None}
+    def press(event):
+        state['before']=({column:int(tree.column(column,'width')) for column in tree['columns']}
+                         if tree.identify_region(event.x,event.y)=='separator' else None)
+    def release(_event):
+        before=state['before'];state['before']=None
+        if before is None:return
+        def remember():
+            if not tree.winfo_exists():return
+            changed=False
+            for column,old in before.items():
+                width=int(tree.column(column,'width'))
+                if width != old:
+                    tree._reqm_manual_widths[column]=width;changed=True
+            if changed and on_change:on_change(dict(tree._reqm_manual_widths))
+        tree.after_idle(remember)
+    tree.bind('<ButtonPress-1>',press,add='+')
+    tree.bind('<ButtonRelease-1>',release,add='+')
 
 
 def tree_sort_value(value):
@@ -282,6 +313,8 @@ def bind_desktop_drag(tree) -> None:
             state["job"] = tree.after(55, edge_scroll)
 
     def press(event):
+        if tree.identify_region(event.x,event.y) not in ('cell','tree'):
+            return
         row = tree.identify_row(event.y)
         state["anchor"] = row
         state["dragging"] = bool(row)

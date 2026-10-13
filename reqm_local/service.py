@@ -112,6 +112,8 @@ class Operations(TrackingOperations):
         self.folder.mkdir(parents=True, exist_ok=True)
         self.settings = settings_at(self.folder)
         self.catalog = ReferenceCatalog.from_csv_dir(self.reference_dir)
+        from .shipping_items import load_active_items
+        self.active_shipping_items = load_active_items(self.reference_dir)
         self.db = sqlite3.connect(self.folder / 'operations.sqlite3')
         self.db.row_factory = sqlite3.Row
         self.db.execute('PRAGMA foreign_keys=ON')
@@ -193,22 +195,25 @@ class Operations(TrackingOperations):
         return target
 
     def seed_item_names(self):
-        """Add packaged item names once without overwriting worker edits."""
-        path=self.reference_dir/'wekeep_item_names.csv'
-        if not path.exists():
+        """Mirror active Shipping names without modifying orders or output history."""
+        expected = self.active_shipping_items
+        current = dict(self.db.execute('SELECT erp_item_code,matching_name FROM item_names'))
+        if current == expected:
             return 0
-        inserted=0
-        with path.open(encoding='utf-8-sig',newline='') as handle:
-            for row in csv.DictReader(handle):
-                code=identifier(row.get('erp_item_code'))
-                name=identifier(row.get('matching_name'))
-                if not code or not name:
-                    continue
-                cursor=self.db.execute(
-                    'INSERT OR IGNORE INTO item_names(erp_item_code,matching_name) VALUES(?,?)',(code,name),
-                )
-                inserted+=cursor.rowcount
-        return inserted
+        self.db.commit()
+        if current:
+            backup = self.folder / 'backups' / 'before-shipping-item-catalog.sqlite3'
+            if not backup.exists():
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                destination = sqlite3.connect(backup)
+                try:
+                    self.db.backup(destination)
+                finally:
+                    destination.close()
+        with self.db:
+            self.db.execute('DELETE FROM item_names')
+            self.db.executemany('INSERT INTO item_names VALUES(?,?)', expected.items())
+        return len(expected)
 
     def confirm_existing_smartstore_matches(self):
         """Retire the legacy amount-split step for already matched SmartStore rows."""
@@ -234,6 +239,8 @@ class Operations(TrackingOperations):
 
     def item_name(self, code, fallback=''):
         code=identifier(code)
+        if code in self.active_shipping_items:
+            return self.active_shipping_items[code]
         if code:
             row=self.db.execute('SELECT matching_name FROM item_names WHERE erp_item_code=?',(code,)).fetchone()
             if row:
@@ -243,14 +250,15 @@ class Operations(TrackingOperations):
         return identifier(fallback)
 
     def item_name_rows(self):
-        return [dict(row) for row in self.db.execute(
-            'SELECT erp_item_code,matching_name FROM item_names ORDER BY matching_name,erp_item_code'
-        )]
+        return [{'erp_item_code':code,'matching_name':name}
+                for code,name in sorted(self.active_shipping_items.items(),key=lambda item:(item[1],item[0]))]
 
     def save_item_name(self, erp_item_code, matching_name, original_code=''):
         code=identifier(erp_item_code);name=identifier(matching_name);original=identifier(original_code)
         if not code or not name:
             raise ValueError('ERP 품목코드와 매칭품목명을 모두 입력하세요.')
+        if code not in self.active_shipping_items or name != self.active_shipping_items[code] or (original and original != code):
+            raise ValueError('품목코드와 품목명은 출고 프로그램의 활성 품목 기준을 사용합니다.')
         with self.db:
             if original and original != code:
                 self.db.execute('DELETE FROM item_names WHERE erp_item_code=?',(original,))
@@ -260,10 +268,21 @@ class Operations(TrackingOperations):
             self.event('품목 기준 저장',f'{code}: {name}')
 
     def item_choices(self):
-        choices={row['erp_item_code']:row['matching_name'] for row in self.item_name_rows()}
-        for code,item in self.catalog.items.items():
-            choices.setdefault(str(code),identifier(item.get('representative_name') or item.get('item_name')))
-        return [{'code':code,'name':name} for code,name in sorted(choices.items())]
+        return [{'code':code,'name':name} for code,name in sorted(self.active_shipping_items.items())]
+
+    def require_active_item(self, code):
+        code=identifier(code)
+        if code not in self.active_shipping_items:
+            raise ValueError(f'출고 프로그램에서 사용 중인 품목이 아닙니다: {code}')
+        return code
+
+    def active_components(self, components):
+        for component in components:
+            code=identifier(component.get('code'))
+            if code not in self.active_shipping_items:
+                return [], f'출고 프로그램에서 사용 중인 품목이 아닙니다: {code}. 상품 매칭을 확인하세요.'
+        return [{**component,'name':self.item_name(component['code'],component.get('name',''))}
+                for component in components], ''
 
     def event(self, action, detail):
         self.db.execute('INSERT INTO events(at,action,detail) VALUES(?,?,?)', (datetime.now().isoformat(timespec='seconds'), action, detail))
@@ -386,6 +405,7 @@ class Operations(TrackingOperations):
                     raise ValueError(f'구성품의 {labels[key]}를 입력하세요.')
             component['warehouse'] = warehouse_code(component['warehouse'])
             component['name'] = self.item_name(component['code'],component['name'])
+            self.require_active_item(component['code'])
             component['quantity'] = quantity(source.get('quantity',''))
             component['unit_amount'] = str(number(source.get('unit_amount','0')))
             if number(component['unit_amount']) != number(component['unit_amount']).to_integral_value():
@@ -434,15 +454,7 @@ class Operations(TrackingOperations):
         if shipping:
             aliases=shipping.aliases.get((channel_key(data.get('channel')),source),[]) or shipping.aliases.get(('',source),[])
             alias_codes={identifier(component.get('item_code')) for alias in aliases for component in _component_rows(alias.get('components'))}
-        combined={}
-        for row in self.item_name_rows():
-            combined[row['erp_item_code']]={'code':row['erp_item_code'],'name':row['matching_name']}
-        for code,item in self.catalog.items.items():
-            combined.setdefault(str(code),{'code':str(code),'name':identifier(item.get('representative_name') or item.get('item_name'))})
-        if shipping:
-            for key,item in shipping.items.items():
-                code=identifier(item.get('item_code')) or key
-                combined.setdefault(code,{'code':code,'name':identifier(item.get('standard_name'))})
+        combined={row['code']:row for row in self.item_choices()}
         results=[]
         for row in combined.values():
             target=compact(f"{row['code']} {row['name']}")
@@ -462,6 +474,9 @@ class Operations(TrackingOperations):
 
     def _attach_wekeep_skus(self, data, components):
         """Require a verified WeKeep SKU whenever the shared shipping DB is available."""
+        components, issue=self.active_components(components)
+        if issue:
+            return [], issue
         shipping = self._shipping_catalog()
         if shipping is None:
             return components, ''
@@ -1272,7 +1287,9 @@ class Operations(TrackingOperations):
                              and order['data'].get('option') == data.get('option')), None)
         if original and original['components']:
             components=self._reprice_components(original['components'],data['amount'],quantity(data['quantity']))
-            return components,('부속품 금액이 주문 금액을 초과합니다.' if not components else '')
+            if not components:
+                return [], '부속품 금액이 주문 금액을 초과합니다.'
+            return self.active_components(components)
         lookup = {**data, 'channel':SMARTSTORE_CHANNEL, 'account':data.get('account','기본')}
         custom = self.db.execute('SELECT components FROM mappings WHERE key=?', (self.mapping_key(lookup),)).fetchone()
         if custom:
@@ -1447,7 +1464,7 @@ class Operations(TrackingOperations):
             component = grouped[key]
             component['quantity'] += quantity(line.quantity)
             component['amount'] = str(number(component['amount']) + line.total)
-        return list(grouped.values()), ''
+        return self.active_components(list(grouped.values()))
 
     def import_esm_erp(self, paths, on):
         imported_on = day(on)
@@ -1530,6 +1547,9 @@ class Operations(TrackingOperations):
 
     def set_erp_entry_output(self, entry_id, *, code=None, name=None, warehouse=None):
         """Apply an override only to the selected actual-shipment Excel output row."""
+        if code is not None:
+            code=self.require_active_item(code)
+            name=self.active_shipping_items[code]
         if str(entry_id).startswith('SSERP:'):
             _,row_id,index_text=str(entry_id).split(':',2)
             with self.db:

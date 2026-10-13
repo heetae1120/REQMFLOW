@@ -40,6 +40,16 @@ class LocalTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.folder=Path(self.temp.name)
         self.s=Operations(self.folder/'data',REFERENCE)
+        # Business-flow fixtures use synthetic and legacy codes independently of
+        # production Shipping selection; catalog restrictions have separate tests.
+        legacy={code:str(item.get('representative_name') or '') for code,item in self.s.catalog.items.items()}
+        self.s.active_shipping_items={**legacy,**self.s.active_shipping_items,
+            'TEST':'테스트','MAIN':'본품','CASE':'케이스','A':'본품','B':'부속품',
+            'ITEM':'품목','ITEM-300':'위킵품목','ITEM-100':'본사품목',
+            'EXCEL-ONLY':'엑셀 전용 품목','EVENT-A':'이벤트 본품',
+            'EVENT-GIFT':'이벤트 사은품','QP1000C':'테스트 상품',
+            'BATTERY':'배터리','CABLE':'케이블'}
+
 
     def tearDown(self):
         self.s.close();self.temp.cleanup()
@@ -120,13 +130,19 @@ class LocalTests(unittest.TestCase):
         self.s.set_mapping(order['id'],[component])
         self.assertEqual(self.s.orders()[0]['state'],'출고 준비')
 
-    def test_packaged_item_names_are_seeded_and_worker_edits_are_preserved(self):
-        rows=self.s.item_name_rows()
-        self.assertEqual(len(rows),184)
-        self.assertEqual(self.s.item_name('QWC-Q3100S-BK'),'Q3100S 그레이')
-        self.s.save_item_name('QWC-Q3100S-BK','작업자 수정명')
+    def test_shipping_item_names_survive_restart_without_legacy_seeding(self):
         self.s.close();self.s=Operations(self.folder/'data',REFERENCE)
-        self.assertEqual(self.s.item_name('QWC-Q3100S-BK'),'작업자 수정명')
+        self.assertEqual(len(self.s.item_choices()),186)
+        expected='Q3100S 그레이(갤럭시워치전용)'
+        self.assertEqual(self.s.item_name('QWC-Q3100S-BK'),expected)
+        with self.assertRaises(ValueError):
+            self.s.save_item_name('QWC-Q3100S-BK','작업자 수정명')
+        self.s.db.execute("INSERT INTO item_names VALUES('RETIRED','과거품목')")
+        self.s.db.commit()
+        self.s.close();self.s=Operations(self.folder/'data',REFERENCE)
+        self.assertEqual(len(self.s.item_choices()),186)
+        self.assertEqual(self.s.item_name('QWC-Q3100S-BK'),expected)
+        self.assertIsNone(self.s.db.execute("SELECT 1 FROM item_names WHERE erp_item_code='RETIRED'").fetchone())
 
     def test_mapping_uses_matching_name_and_order_warehouse_can_filter_request(self):
         _,first=self.import_order(line='WARE-100',fee=0)
@@ -141,7 +157,7 @@ class LocalTests(unittest.TestCase):
         )])
         self.s.set_order_warehouse([first['id']],'100 본사창고')
         current={order['data']['line_no']:order for order in self.s.orders()}
-        self.assertEqual(current['WARE-100']['components'][0]['name'],'Q3100S 그레이')
+        self.assertEqual(current['WARE-100']['components'][0]['name'],'Q3100S 그레이(갤럭시워치전용)')
         self.assertEqual(self.s.order_warehouse(current['WARE-100']),'100')
         self.assertEqual(self.s.order_warehouse(current['WARE-300']),'300')
         self.s.request(
@@ -599,7 +615,7 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(len(history),1)
         self.assertEqual(history[0]['tracking'],'TRACK-ORDER-RECIPIENT')
         self.assertEqual(history[0]['warehouse'],'300')
-        self.assertEqual(history[0]['matching_item'],'매칭품목')
+        self.assertEqual(history[0]['matching_item'],'품목')
         self.assertEqual(history[0]['source_file'],source.name)
         self.s.set_artifact_note(batch,history[0]['note_key'],'주소 재확인 완료')
         refreshed=[row for row in self.s.artifact_history_rows() if row['artifact_id']==batch]
@@ -621,8 +637,8 @@ class LocalTests(unittest.TestCase):
         request_row=next(row for row in history if row['artifact_id']==request_id)
         erp_row=next(row for row in history if row['artifact_id']==erp_id and row['source']=='일반 ERP')
         self.assertEqual((request_row['warehouse'],erp_row['warehouse']),('100','100'))
-        self.assertEqual(request_row['matching_item'],'Q3100S 그레이')
-        self.assertEqual(erp_row['matching_item'],'Q3100S 그레이')
+        self.assertEqual(request_row['matching_item'],'Q3100S 그레이(갤럭시워치전용)')
+        self.assertEqual(erp_row['matching_item'],'Q3100S 그레이(갤럭시워치전용)')
 
     def test_existing_workspace_can_attach_an_old_order_file_before_tracking_export(self):
         source,order=self.import_order();line=self.request(order)
@@ -1100,7 +1116,7 @@ class LocalTests(unittest.TestCase):
         self.s.request([order['id']],'2026-10-01',self.folder/'safe-request.xlsx')
         book=load_workbook(self.folder/'safe-request.xlsx',data_only=True)
         rows=list(book['택배출고'].values)
-        self.assertEqual([(row[2],row[3]) for row in rows[1:]], [('위킵 배터리',2),('위킵 케이블',2)])
+        self.assertEqual([(row[2],row[3]) for row in rows[1:]], [('배터리',2),('케이블',2)])
         book.close()
 
     def test_shipping_alias_with_missing_sku_is_never_exportable(self):

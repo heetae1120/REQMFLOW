@@ -1,0 +1,971 @@
+{
+  "source_table": "items",
+  "checked_on": "2026-10-13",
+  "items": [
+    {
+      "item_code": "[RQM]-QMP5-WH",
+      "standard_name": "QMP5 화이트",
+      "is_active": true
+    },
+    {
+      "item_code": "[RQM]-QP1000C1-BK",
+      "standard_name": "QP1000C 블랙",
+      "is_active": true
+    },
+    {
+      "item_code": "[RQM]-QP1000C1-BL",
+      "standard_name": "QP1000C 블루",
+      "is_active": true
+    },
+    {
+      "item_code": "[RQM]-QP1000C1-PK",
+      "standard_name": "QP1000C 핑크",
+      "is_active": true
+    },
+    {
+      "item_code": "[RQM]-QP1000C1-WH",
+      "standard_name": "QP1000C 화이트",
+      "is_active": true
+    },
+    {
+      "item_code": "[RQM]-QP2000C1-Beige",
+      "standard_name": "QP2000C 베이지",
+      "is_active": true
+    },
+    {
+      "item_code": "[RQM]-QP2000C1-BK",
+      "standard_name": "QP2000C 블랙",
+      "is_active": true
+    },
+    {
+      "item_code": "[RQM]-QP2000C1-Green",
+      "standard_name": "QP2000C 포레그린",
+      "is_active": true
+    },
+    {
+      "item_code": "[RQM]-QP2000C1-WH",
+      "standard_name": "QP2000C 화이트",
+      "is_active": true
+    },
+    {
+      "item_code": "ACONE-Sliconpad_BK",
+      "standard_name": "ACONE-실리콘패드_블랙",
+      "is_active": true
+    },
+    {
+      "item_code": "ACONE-Sliconpad_CL",
+      "standard_name": "ACONE-실리콘패드_클라우드",
+      "is_active": true
+    },
+    {
+      "item_code": "ACONE-Sliconpad_CO",
+      "standard_name": "ACONE-실리콘패드_코랄",
+      "is_active": true
+    },
+    {
+      "item_code": "ACONE-Sliconpad_MU",
+      "standard_name": "ACONE-실리콘패드_머스타드",
+      "is_active": true
+    },
+    {
+      "item_code": "ACONE-Sliconpad_RD",
+      "standard_name": "ACONE-실리콘패드_레드",
+      "is_active": true
+    },
+    {
+      "item_code": "ACONE-Sliconpad_SA",
+      "standard_name": "ACONE 실리콘패드 샌드",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000-Cl-kyobo",
+      "standard_name": "QP1000 실리콘 케이스_투명_교보용",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000-Hand-GlB",
+      "standard_name": "QP1000C 실리콘케이스 야광핸디형_블루",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000-Hand-GlG",
+      "standard_name": "QP1000C 실리콘케이스 야광핸디형_그린",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000-Hand-GlO",
+      "standard_name": "QP1000C 실리콘케이스 야광핸디형_오렌지",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000-Hand-GlY",
+      "standard_name": "QP1000C 실리콘케이스 야광핸디형_옐로우",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000A-Ebony",
+      "standard_name": "QP1000C 실리콘케이스 기본형 - 에보니",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000A-Lavende",
+      "standard_name": "QP1000C 실리콘케이스 기본형 - 라벤더",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000A-Mint",
+      "standard_name": "QP1000C 실리콘케이스 기본형 - 민트",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000A-Sand",
+      "standard_name": "QP1000C 실리콘케이스 기본형 - 샌드",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000C-Hand-Bl",
+      "standard_name": "QP1000C 실리콘케이스 핸디형 - 블루",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000C-Hand-Cl",
+      "standard_name": "QP1000C 실리콘케이스 핸디형 - 클라우드",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000C-Hand-Eb",
+      "standard_name": "QP1000C 실리콘케이스 핸디형 - 에보니",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000C-Hand-Gr",
+      "standard_name": "QP1000C 실리콘케이스 핸디형 - 그린",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000C-Hand-La",
+      "standard_name": "QP1000C 실리콘케이스 핸디형 - 라벤더",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000C-Hand-Mi",
+      "standard_name": "QP1000C 실리콘케이스 핸디형 - 민트",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000C-Hand-PK",
+      "standard_name": "QP1000C 실리콘케이스 핸디형_핑크",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000C-Hand-Pu",
+      "standard_name": "QP1000C 실리콘케이스 핸디형 - 퍼플",
+      "is_active": false
+    },
+    {
+      "item_code": "CASE-QP1000C-Hand-Re",
+      "standard_name": "QP1000C 실리콘케이스 핸디형 - 레드",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000C-Hand-Sa",
+      "standard_name": "QP1000C 실리콘케이스 핸디형 - 샌드",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP1000C-Hand-Ye",
+      "standard_name": "QP1000C 실리콘케이스 핸디형 - 옐로우",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000-Cl-kyobo",
+      "standard_name": "QP2000 실리콘 케이스_투명_교보용",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000-Hand-GlB",
+      "standard_name": "QP2000C 실리콘케이스 야광핸디형_블루",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000-Hand-GlG",
+      "standard_name": "QP2000C 실리콘케이스 야광핸디형_그린",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000-Hand-GlO",
+      "standard_name": "QP2000C 실리콘케이스 야광핸디형_오렌지",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000-Hand-GlY",
+      "standard_name": "QP2000C 실리콘케이스 야광핸디형_옐로우",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000A_LT_M",
+      "standard_name": "브라우니백",
+      "is_active": false
+    },
+    {
+      "item_code": "CASE-QP2000A_LT_WBG",
+      "standard_name": "미니마실백 베이지",
+      "is_active": false
+    },
+    {
+      "item_code": "CASE-QP2000A_LT_WBL",
+      "standard_name": "미니마실백 스카이블루",
+      "is_active": false
+    },
+    {
+      "item_code": "CASE-QP2000A_LT_WPP",
+      "standard_name": "미니마실백 라벤더",
+      "is_active": false
+    },
+    {
+      "item_code": "CASE-QP2000C_Hand_CL",
+      "standard_name": "QP2000C 실리콘 케이스 핸디형 클라우드",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000C_Hand_La",
+      "standard_name": "QP2000C 실리콘케이스 핸디형_라벤더",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000C_Hand_Mi",
+      "standard_name": "QP2000C 실리콘케이스 핸디형_민트",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000C_Hand_PK",
+      "standard_name": "QP2000C 실리콘케이스 핸디형_핑크",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000C_Hand_Sa",
+      "standard_name": "QP2000C 실리콘케이스 핸디형_샌드",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000C-Blue",
+      "standard_name": "QP2000C 실리콘케이스 기본형 - 블루",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000C-Cloud",
+      "standard_name": "QP2000C 실리콘케이스 기본형 - 클라우드",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000C-Ebony",
+      "standard_name": "QP2000C 실리콘케이스 기본형 - 에보니",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000C-Green",
+      "standard_name": "QP2000C 실리콘케이스 기본형 - 그린",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000C-Lavende",
+      "standard_name": "QP2000C 실리콘케이스 기본형 - 라벤더",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000C-Mint",
+      "standard_name": "QP2000C 실리콘케이스 기본형 - 민트",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000C-PINK",
+      "standard_name": "QP2000C 실리콘케이스 기본형 - 핑크",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000C-purple",
+      "standard_name": "QP2000C 실리콘케이스 기본형 - 퍼플",
+      "is_active": false
+    },
+    {
+      "item_code": "CASE-QP2000C-Red",
+      "standard_name": "QP2000C 실리콘케이스 기본형 - 레드",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000C-Sand",
+      "standard_name": "QP2000C 실리콘케이스 기본형 - 샌드",
+      "is_active": true
+    },
+    {
+      "item_code": "CASE-QP2000C-Yellow",
+      "standard_name": "QP2000C 실리콘케이스 기본형 - 옐로우",
+      "is_active": true
+    },
+    {
+      "item_code": "GOOUTstciker_CAMPING",
+      "standard_name": "GOOUT스티커_CAMPING",
+      "is_active": true
+    },
+    {
+      "item_code": "GOOUTstciker_SPORTS",
+      "standard_name": "GOOUT스티커_SPORTS",
+      "is_active": true
+    },
+    {
+      "item_code": "POUCH-Tarpaulin_F-GR",
+      "standard_name": "타포린파우치 - 그레이",
+      "is_active": true
+    },
+    {
+      "item_code": "POUCH-Tarpaulin-BK",
+      "standard_name": "타포린파우치 - 블랙",
+      "is_active": true
+    },
+    {
+      "item_code": "POUCH-Tarpaulin-BLUE",
+      "standard_name": "타포린파우치 - 블루",
+      "is_active": true
+    },
+    {
+      "item_code": "POUCH-Tarpaulin-RED",
+      "standard_name": "타포린파우치 - 레드",
+      "is_active": true
+    },
+    {
+      "item_code": "POUCH-Tarpaulin-WH",
+      "standard_name": "타포린파우치 - 화이트",
+      "is_active": true
+    },
+    {
+      "item_code": "POUCH-Tarpaulin-YL",
+      "standard_name": "타포린파우치 - 옐로우",
+      "is_active": true
+    },
+    {
+      "item_code": "QA_Keyring_AC_XMAS",
+      "standard_name": "GOOUT 아크릴 키링 - 쿠키",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Custumpouch_BE",
+      "standard_name": "커스텀파우치 - 베이지",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Custumpouch_BK",
+      "standard_name": "커스텀파우치 - 블랙",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Custumpouch_BL",
+      "standard_name": "커스텀파우치 - 블루",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Custumpouch_GR",
+      "standard_name": "커스텀파우치 - 그린",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Custumpouch_YL",
+      "standard_name": "커스텀파우치 - 옐로우",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Jibbitz_CAMPING",
+      "standard_name": "GO OUT 지비츠 참 스티커팩 - 캠핑",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Jibbitz_GOOUT",
+      "standard_name": "리큐엠 액세서리-지비츠_GO OUT",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Jibbitz_SPORTS",
+      "standard_name": "리큐엠 액세서리-지비츠_SPORTS",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Jibbitz_TRAVEL",
+      "standard_name": "GO OUT 지비츠 참 스티커팩 - 여행",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-KeyRing_E",
+      "standard_name": "리큐엠 액세서리-키링_E",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-KeyRing_M",
+      "standard_name": "QA-KeyRing_M",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-KeyRing_Q",
+      "standard_name": "GOOUT 젤리키링 - Q 옐로우",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-KeyRing_R",
+      "standard_name": "GOOUT 젤리키링 - R 베이지",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Luggagescale_BK",
+      "standard_name": "캐리어저울 블랙",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Luggagescale_WH",
+      "standard_name": "캐리어저울 화이트",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Minihardpouch_BE",
+      "standard_name": "미니 커스텀파우치 - 베이지",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Minihardpouch_BK",
+      "standard_name": "미니 커스텀파우치 - 블랙",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Minihardpouch_BL",
+      "standard_name": "미니 커스텀파우치 - 블루",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Minihardpouch_GR",
+      "standard_name": "미니 커스텀파우치 - 그린",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Minihardpouch_YL",
+      "standard_name": "미니 커스텀파우치 - 옐로우",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Rug_GOOUT_BL",
+      "standard_name": "GOOUT 러그 - 블루",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Rug_GOOUT_GR",
+      "standard_name": "GOOUT 러그 - 그린",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Rug_GOOUT_RD",
+      "standard_name": "GOOUT 러그 - 레드",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Rug_GOOUT_YL",
+      "standard_name": "GOOUT 러그 - 옐로우",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-Rug_SYMBOL-B_BL",
+      "standard_name": "리큐엠 액세서리-Rug_SYMBOL-B_블루",
+      "is_active": true
+    },
+    {
+      "item_code": "QA-UVSticker",
+      "standard_name": "UV 판박이 스티커 - 럭키피플신드롬",
+      "is_active": true
+    },
+    {
+      "item_code": "QCB-CC30S_Butter",
+      "standard_name": "30cm 크레용케이블 버터",
+      "is_active": true
+    },
+    {
+      "item_code": "QCB-CC30S_Carrot",
+      "standard_name": "30cm 크레용케이블 캐롯",
+      "is_active": true
+    },
+    {
+      "item_code": "QCB-CC30S_CobaltBlue",
+      "standard_name": "30cm 크레용케이블 코발트블루",
+      "is_active": true
+    },
+    {
+      "item_code": "QCB-CC30S_Lavender",
+      "standard_name": "30cm 크레용케이블 라벤더",
+      "is_active": true
+    },
+    {
+      "item_code": "QCB-CC30S_NeonGreen",
+      "standard_name": "30cm 크레용케이블 네온그린",
+      "is_active": true
+    },
+    {
+      "item_code": "QCB-CC60S_Butter",
+      "standard_name": "60cm 크레용케이블 버터",
+      "is_active": true
+    },
+    {
+      "item_code": "QCB-CC60S_Carrot",
+      "standard_name": "60cm 크레용케이블 캐롯",
+      "is_active": true
+    },
+    {
+      "item_code": "QCB-CC60S_CobaltBlue",
+      "standard_name": "60cm 크레용케이블 코발트블루",
+      "is_active": true
+    },
+    {
+      "item_code": "QCB-CC60S_Lavender",
+      "standard_name": "60cm 크레용케이블 라벤더",
+      "is_active": true
+    },
+    {
+      "item_code": "QCB-CC60S_NeonGreen",
+      "standard_name": "60cm 크레용케이블 네온그린",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Bubblepad_Bk",
+      "standard_name": "맥세이프버블패드 소프트 블랙",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Bubblepad_Bl",
+      "standard_name": "맥세이프버블패드 소프트 블루",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Bubblepad_La",
+      "standard_name": "맥세이프버블패드 소프트 라벤더",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Bubblepad_Mi",
+      "standard_name": "맥세이프버블패드 소프트 민트",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Bubblepad_Or",
+      "standard_name": "맥세이프버블패드 오렌지",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Bubblepad-Cr",
+      "standard_name": "맥세이프버블패드 소프트 크림",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Cardwallet_AGY",
+      "standard_name": "맥세이프 카드지갑 - 애쉬그레이",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Cardwallet_BE",
+      "standard_name": "맥세이프 카드지갑 - 베이지",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Cardwallet_BR",
+      "standard_name": "맥세이프 카드지갑 - 브라운",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Cardwallet_DBR",
+      "standard_name": "맥세이프 카드지갑 - 다크브라운",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Cardwallet_GR",
+      "standard_name": "맥세이프 카드지갑 - 그린",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Cardwallet_NA",
+      "standard_name": "맥세이프 카드지갑 - 네이비",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Cardwallet_OR",
+      "standard_name": "맥세이프 카드지갑 - 오렌지",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Cardwallet_PK",
+      "standard_name": "맥세이프 카드지갑 - 핑크",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Cardwallet_SGY",
+      "standard_name": "맥세이프 카드지갑 - 솔리드그레이",
+      "is_active": true
+    },
+    {
+      "item_code": "QMA-Ringsticker_BK",
+      "standard_name": "맥세이프플레이트",
+      "is_active": true
+    },
+    {
+      "item_code": "QMC-ACONE-MB",
+      "standard_name": "ACONE 모닝브리즈",
+      "is_active": true
+    },
+    {
+      "item_code": "QMC-ACONE-MS",
+      "standard_name": "ACONE 미드나잇섀도우",
+      "is_active": true
+    },
+    {
+      "item_code": "QMC-ACONE-SS",
+      "standard_name": "ACONE 선셋",
+      "is_active": true
+    },
+    {
+      "item_code": "QMC-ACONE-WL",
+      "standard_name": "ACONE 원더랜드",
+      "is_active": true
+    },
+    {
+      "item_code": "QMC-QM4100_GY",
+      "standard_name": "QM4100 솔리드그레이",
+      "is_active": true
+    },
+    {
+      "item_code": "QMC-QM4100_WH",
+      "standard_name": "QM4100 소프트화이트",
+      "is_active": true
+    },
+    {
+      "item_code": "QMC-T3100_BE",
+      "standard_name": "QMC-T3100_BE",
+      "is_active": true
+    },
+    {
+      "item_code": "QMC-T3100_BK",
+      "standard_name": "T3100 - 블랙",
+      "is_active": true
+    },
+    {
+      "item_code": "QMS-QMS01_BK",
+      "standard_name": "QMS01 블랙",
+      "is_active": true
+    },
+    {
+      "item_code": "QP1000C1-Butter",
+      "standard_name": "QP1000C 버터",
+      "is_active": true
+    },
+    {
+      "item_code": "QP1000C1-Carrot",
+      "standard_name": "QP1000C 캐롯",
+      "is_active": true
+    },
+    {
+      "item_code": "QP1000C1-CobaltBlue",
+      "standard_name": "QP1000C 코발트블루",
+      "is_active": true
+    },
+    {
+      "item_code": "QP1000C1-NeonGreen",
+      "standard_name": "QP1000C 네온그린",
+      "is_active": true
+    },
+    {
+      "item_code": "QP2000C_SageMint",
+      "standard_name": "QP2000C 세이지민트",
+      "is_active": true
+    },
+    {
+      "item_code": "QP2000C_TomatoRed",
+      "standard_name": "QP2000C 토마토레드",
+      "is_active": true
+    },
+    {
+      "item_code": "QPD-330_BL",
+      "standard_name": "QPD330 블루",
+      "is_active": true
+    },
+    {
+      "item_code": "QPD-330_PK",
+      "standard_name": "QPD330 핑크",
+      "is_active": true
+    },
+    {
+      "item_code": "QPD-330_SGY",
+      "standard_name": "QPD330 솔리드그레이",
+      "is_active": true
+    },
+    {
+      "item_code": "QPD-330_WH",
+      "standard_name": "QPD330 소프트화이트",
+      "is_active": true
+    },
+    {
+      "item_code": "QPD-365N_GY",
+      "standard_name": "QPD365N 그레이",
+      "is_active": true
+    },
+    {
+      "item_code": "QPD-365N_WH",
+      "standard_name": "QPD365N 화이트",
+      "is_active": true
+    },
+    {
+      "item_code": "QS-QST01M_BK",
+      "standard_name": "QST01M 블랙",
+      "is_active": true
+    },
+    {
+      "item_code": "QS-QST01M_WH",
+      "standard_name": "QST01M 화이트",
+      "is_active": true
+    },
+    {
+      "item_code": "QTC-45W_BK",
+      "standard_name": "45W 여행용어댑터 - 블랙",
+      "is_active": true
+    },
+    {
+      "item_code": "QTC-45W_WH",
+      "standard_name": "45W 여행용어댑터 - 화이트",
+      "is_active": true
+    },
+    {
+      "item_code": "QWC-A1500A",
+      "standard_name": "QWC-A1500",
+      "is_active": true
+    },
+    {
+      "item_code": "QWC-CW500",
+      "standard_name": "차량용 무선충전기 CW500",
+      "is_active": true
+    },
+    {
+      "item_code": "QWC-L5100-A",
+      "standard_name": "QWC-L5100 애플워치전용",
+      "is_active": true
+    },
+    {
+      "item_code": "QWC-L5100-S",
+      "standard_name": "QWC-L5100S 갤럭시워치전용",
+      "is_active": true
+    },
+    {
+      "item_code": "QWC-Q1500GR",
+      "standard_name": "QWC-Q1500 그레이",
+      "is_active": true
+    },
+    {
+      "item_code": "QWC-Q1500PK",
+      "standard_name": "QWC-Q1500 핑크",
+      "is_active": true
+    },
+    {
+      "item_code": "QWC-Q1500WH",
+      "standard_name": "QWC-Q1500 화이트",
+      "is_active": true
+    },
+    {
+      "item_code": "QWC-Q3100S-BK",
+      "standard_name": "Q3100S 그레이(갤럭시워치전용)",
+      "is_active": true
+    },
+    {
+      "item_code": "QWC-Q3100S-WH",
+      "standard_name": "Q3100S 화이트(갤럭시워치전용)",
+      "is_active": true
+    },
+    {
+      "item_code": "QWC-QS1500-BL",
+      "standard_name": "QWC-QS1500 파스텔 블루",
+      "is_active": true
+    },
+    {
+      "item_code": "QWC-QS1500-GR",
+      "standard_name": "QS1500 파스텔 그린",
+      "is_active": true
+    },
+    {
+      "item_code": "QWC-QS1500-PK",
+      "standard_name": "QWC-QS1500 파스텔 핑크",
+      "is_active": true
+    },
+    {
+      "item_code": "QWC-UV300-BK",
+      "standard_name": "리큐엠-UV살균기 무선충전 시계_블랙",
+      "is_active": true
+    },
+    {
+      "item_code": "REQM-ShoppingBag-L",
+      "standard_name": "리큐엠 쇼핑백 L",
+      "is_active": true
+    },
+    {
+      "item_code": "REQM-ShoppingBag-M",
+      "standard_name": "리큐엠 쇼핑백 M",
+      "is_active": true
+    },
+    {
+      "item_code": "RQM-CC150-CK-BL",
+      "standard_name": "CC150K 블루",
+      "is_active": true
+    },
+    {
+      "item_code": "RQM-CC150-CK-PK",
+      "standard_name": "CC150K 핑크",
+      "is_active": true
+    },
+    {
+      "item_code": "RQM-CC150-CS-GR",
+      "standard_name": "60W 케이블 솔리드그레이",
+      "is_active": true
+    },
+    {
+      "item_code": "RQM-CC150-CS-WH",
+      "standard_name": "60W 케이블 소프트화이트",
+      "is_active": true
+    },
+    {
+      "item_code": "RQM-MFICA150-CS",
+      "standard_name": "실리콘케이블 8핀 화이트",
+      "is_active": true
+    },
+    {
+      "item_code": "Safetymanual",
+      "standard_name": "안전백서매뉴얼",
+      "is_active": true
+    },
+    {
+      "item_code": "SET-SOMEONE-PINK",
+      "standard_name": "SOMEONE 무선충전세트 - 핑크",
+      "is_active": false
+    },
+    {
+      "item_code": "SOMEONE-BLUE",
+      "standard_name": "SOMEONE_블루 (포장지확인) 디펑",
+      "is_active": true
+    },
+    {
+      "item_code": "SP-A20W일체형",
+      "standard_name": "일체형 보조배터리 - 고속 8핀",
+      "is_active": true
+    },
+    {
+      "item_code": "SP-AC50-공용(8핀)",
+      "standard_name": "SP-AC50-공용8핀",
+      "is_active": true
+    },
+    {
+      "item_code": "SP-C20W일체형",
+      "standard_name": "일체형 보조배터리 - 고속 C타입",
+      "is_active": true
+    },
+    {
+      "item_code": "SP-CA50-공용(C타입)",
+      "standard_name": "SP-CA50 C타입",
+      "is_active": true
+    },
+    {
+      "item_code": "SP-C타입일체형",
+      "standard_name": "일체형 미니 보조배터리 C타입",
+      "is_active": true
+    },
+    {
+      "item_code": "SP-일체형8핀",
+      "standard_name": "일체형 미니 보조배터리 8핀",
+      "is_active": true
+    },
+    {
+      "item_code": "VAUX-QCL100-그린",
+      "standard_name": "QCL100 올리브그린",
+      "is_active": true
+    },
+    {
+      "item_code": "VAUX-QCL100-레드",
+      "standard_name": "QCL100 레드",
+      "is_active": true
+    },
+    {
+      "item_code": "VAUX-QCL100-블랙",
+      "standard_name": "QCL100 블랙",
+      "is_active": true
+    },
+    {
+      "item_code": "VAUX-QCL100-블루",
+      "standard_name": "QCL100 그레이",
+      "is_active": true
+    },
+    {
+      "item_code": "VAUX-QCL100-샌드",
+      "standard_name": "QCL100 베이지",
+      "is_active": true
+    },
+    {
+      "item_code": "VAUX-QCL100-화이트",
+      "standard_name": "QCL100 화이트",
+      "is_active": true
+    },
+    {
+      "item_code": "VAUX-QTF200-GR",
+      "standard_name": "QTF200 그레이",
+      "is_active": true
+    },
+    {
+      "item_code": "VAUX-QTF200-WH",
+      "standard_name": "QTF200 화이트",
+      "is_active": true
+    },
+    {
+      "item_code": "Velcro-tie_1M",
+      "standard_name": "벨크로 타이 1M",
+      "is_active": true
+    },
+    {
+      "item_code": "Velcro-tie_3M",
+      "standard_name": "벨크로타이 3M",
+      "is_active": true
+    },
+    {
+      "item_code": "VX-M100",
+      "standard_name": "VAUX 훈증등",
+      "is_active": true
+    },
+    {
+      "item_code": "액세서리-아크릴 키링_눈사람",
+      "standard_name": "액세서리-아크릴 키링_눈사람",
+      "is_active": true
+    },
+    {
+      "item_code": "액세서리-아크릴 키링_산타",
+      "standard_name": "액세서리-아크릴 키링_산타",
+      "is_active": true
+    },
+    {
+      "item_code": "액세서리-아크릴 키링_선물",
+      "standard_name": "액세서리-아크릴 키링_선물",
+      "is_active": true
+    },
+    {
+      "item_code": "액세서리-아크릴 키링_장식볼-블루",
+      "standard_name": "액세서리-아크릴 키링_장식볼-블루",
+      "is_active": true
+    },
+    {
+      "item_code": "액세서리-아크릴 키링_장식볼-핑크",
+      "standard_name": "액세서리-아크릴 키링_장식볼-핑크",
+      "is_active": true
+    },
+    {
+      "item_code": "액세서리-아크릴 키링_쿠키",
+      "standard_name": "액세서리-아크릴 키링_쿠키",
+      "is_active": true
+    },
+    {
+      "item_code": "액세서리-아크릴 키링_트리",
+      "standard_name": "액세서리-아크릴 키링_트리",
+      "is_active": true
+    }
+  ]
+}

@@ -24,7 +24,7 @@ def run(folder):
         order.write_bytes(workbook_bytes(headers,[['DEMO-ORDER','DEMO-LINE','데모 상품','데모 옵션',3,10001,'가상 수령인','01000000000','00123','실제 배송 금지 테스트 주소',3000]]))
         service.import_files([order],channel_override='오늘의집')
         row=service.orders()[0]
-        service.set_mapping(row['id'],[dict(code='DEMO-ERP',logistics_code='DEMO-WMS',name='테스트 상품',quantity=1,unit_amount=0,warehouse='300',customer='DEMO-CUSTOMER')])
+        service.set_mapping(row['id'],[dict(code='QWC-Q3100S-BK',logistics_code='QWC-Q3100S-BK',name='테스트 상품',quantity=1,unit_amount=0,warehouse='300',customer='DEMO-CUSTOMER')])
         service.request([row['id']],'2026-10-01',folder/'demo-request.xlsx')
         assert service.auto_import_shipments('2026-10-01') == (1,0)
         service.export_erp('2026-10-01','2026-10-01',folder/'demo-erp.xlsx')
@@ -59,7 +59,7 @@ def run(folder):
             '출력일(요일)','출고일','종류','판매처','주문번호','수령인','연락처','판매품목','옵션','매칭품목',
             '수량','금액','송장번호','출하창고','비고','등록','묶음 ID',
         )
-        assert len(app.item_name_tree.get_children()) == 184
+        assert len(app.item_name_tree.get_children()) == 186
         assert len(app.table.get_children())==1
         app.table.selection_set(row['id']);app.show_detail()
         assert len(app.history.get_children())==2

@@ -9,6 +9,7 @@ import sys
 import tempfile
 import urllib.parse
 import urllib.request
+import urllib.error
 from pathlib import Path
 
 from .cloud import load_cloud_config
@@ -18,6 +19,7 @@ UPDATE_BUCKET = 'reqm-updates'
 UPDATE_PREFIX = 'desktop'
 MANIFEST_NAME = 'latest.json'
 EXE_NAME = 'REQM_FLOW.exe'
+GITHUB_LATEST_URL = 'https://api.github.com/repos/heetae1120/REQMFLOW/releases/latest'
 
 
 def version_tuple(value):
@@ -40,14 +42,36 @@ def update_manifest_url(config=None):
     return f'{base}/storage/v1/object/public/{bucket}/{path}'
 
 
-def latest_release(current_version, timeout=8, config=None):
-    manifest_url=update_manifest_url(config)
+def _read_json(url, timeout):
     request = urllib.request.Request(
-        manifest_url,
+        url,
         headers={'Accept':'application/json','User-Agent':'REQM-FLOW-Updater'},
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        payload = json.load(response)
+        return json.load(response)
+
+
+def latest_release(current_version, timeout=8, config=None):
+    try:
+        release = _read_json(GITHUB_LATEST_URL, timeout)
+        version = str(release.get('tag_name','')).lstrip('v')
+        if not re.fullmatch(r'\d+\.\d+\.\d+',version):
+            raise ValueError('GitHub 업데이트 버전이 올바르지 않습니다.')
+        if version_tuple(version) <= version_tuple(current_version):
+            return None
+        assets = {asset['name']:asset for asset in release.get('assets',[])}
+        executable = assets.get(EXE_NAME,{})
+        checksum = str(executable.get('digest') or '').removeprefix('sha256:')
+        download = str(executable.get('browser_download_url') or '')
+        if not re.fullmatch(r'[0-9a-f]{64}',checksum) or not download.startswith(
+                'https://github.com/heetae1120/REQMFLOW/releases/download/'):
+            raise ValueError('GitHub 실행파일 또는 SHA-256 정보가 없습니다.')
+        return {'version':version,'exe_url':download,'sha256':checksum}
+    except (OSError,ValueError,KeyError,TypeError):
+        # Older deployed clients still use this mirror; retain outage fallback.
+        pass
+    manifest_url=update_manifest_url(config)
+    payload = _read_json(manifest_url, timeout)
     version = str(payload.get('version','')).lstrip('v')
     if not version or version_tuple(version) <= version_tuple(current_version):
         return None
