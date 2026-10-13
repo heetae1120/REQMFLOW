@@ -57,6 +57,7 @@ jobs:
           if (-not $result.ok) { throw 'Packaged test failed' }
           if ($result.version -ne '${{ steps.release.outputs.version }}') { throw 'Packaged version mismatch' }
       - name: Prepare release assets
+        id: assets
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
@@ -101,7 +102,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
-          RELEASE_EXISTS: ${{ steps.release.outputs.release_exists }}
+          RELEASE_EXISTS: ${{ steps.assets.outputs.release_exists }}
         run: |
           $tag = "v$env:RELEASE_VERSION"
           if ($env:RELEASE_EXISTS -eq 'true') {
