@@ -127,12 +127,12 @@ try {
   if($RestartTestFolder) {
     Start-Process -FilePath ${targetExe} -WorkingDirectory $Target -ArgumentList @('--self-test', ('"' + $RestartTestFolder + '"')) -WindowStyle Hidden
   } else {
-    Start-Process -FilePath ${targetExe} -WorkingDirectory $Target -WindowStyle Hidden
+    Start-Process -FilePath ${targetExe} -WorkingDirectory $Target -WindowStyle Normal
   }
 } catch {
   if(Test-Path -LiteralPath ${targetExe}) { Remove-Item -LiteralPath ${targetExe} -Force }
   if(Test-Path -LiteralPath ${backupExe}) { Move-Item -LiteralPath ${backupExe} -Destination ${targetExe} -Force }
-  if(Test-Path -LiteralPath ${targetExe}) { Start-Process -FilePath ${targetExe} -WorkingDirectory $Target -WindowStyle Hidden }
+  if(Test-Path -LiteralPath ${targetExe}) { Start-Process -FilePath ${targetExe} -WorkingDirectory $Target -WindowStyle Normal }
   exit 4
 }
 $stagePath = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
