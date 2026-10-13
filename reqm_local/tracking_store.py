@@ -5,10 +5,11 @@ import hashlib
 import getpass
 import json
 import uuid
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 
-from .files import parse_orders, workbook_bytes
+from .files import parse_orders, workbook_bytes, read_rows, identifier, ORDER_COLUMNS
 from .tracking import HEADERS, STATES, delivery_key, identity, manual_invoice, reconcile
 
 
@@ -22,6 +23,36 @@ def valid_day(value):
 
 def now():
     return datetime.now().isoformat(timespec='seconds')
+
+
+def parse_tracking_orders(path, profiles, channel_override=None, canonical_only=False):
+    """Shipping's combined export carries the marketplace on every row."""
+    rows = read_rows(path)
+    for start, headers in enumerate(rows[:30]):
+        names = [identifier(h).replace(' ', '') for h in headers]
+        if not all(h in names for h in HEADERS[:10]):
+            continue
+        indexes = {h: names.index(h) for h in HEADERS[:10]}
+        result = []
+        for rowno, row in enumerate(rows[start + 1:], start + 2):
+            value = lambda h: identifier(row[indexes[h]]) if indexes[h] < len(row) else ''
+            if not value('주문번호'):
+                continue
+            entry = dict.fromkeys(ORDER_COLUMNS, '')
+            entry.update({field: value(header) for field, header in zip(
+                ('order_no', 'channel', 'product', 'quantity', 'recipient', 'phone', 'postcode', 'address', 'memo'), HEADERS)})
+            entry.update(account='기본', source_file=Path(path).name, source_row=rowno,
+                         source_header_row=start + 1, format_name='출고프로그램 통합 양식')
+            digits = ''.join(c for c in entry['phone'] if c.isdigit())
+            if len(digits) == 10 and not digits.startswith('0'):
+                entry['phone'] = '0' + digits
+            if entry['postcode'].isdigit():
+                entry['postcode'] = entry['postcode'].zfill(5)
+            result.append(entry)
+        if not result:
+            raise ValueError('출고 파일에 주문행이 없습니다.')
+        return result
+    return [] if canonical_only else parse_orders(path, profiles, channel_override=channel_override)
 
 
 class TrackingOperations:
@@ -55,7 +86,7 @@ class TrackingOperations:
         for path in paths:
             source = Path(path)
             content = source.read_bytes()
-            rows = parse_orders(source, profiles, channel_override=channel_override)
+            rows = parse_tracking_orders(source, profiles, channel_override=channel_override)
             if not rows:
                 raise ValueError(f'{source.name}: 입력할 주문이 없습니다.')
             # Include parsed mapping so a different marketplace cannot silently reuse a job.
@@ -120,9 +151,26 @@ class TrackingOperations:
         # A background browser operation must not replace changes made in another PC.
         if expected is not None and encode(entries) != expected:
             raise ValueError('조회 중 작업이 변경되었습니다. 최신 작업에서 다시 조회하세요.')
+        # Repair old combined-file imports using their preserved original bytes.
+        job = self.db.execute('SELECT source_name,source_content FROM tracking_jobs WHERE id=?', (job_id,)).fetchone()
+        with tempfile.TemporaryDirectory(prefix='reqm-tracking-source-') as folder:
+            source = Path(folder) / Path(job['source_name']).name
+            source.write_bytes(job['source_content'])
+            restored = parse_tracking_orders(source, self.settings['profiles'], canonical_only=True)
+        repaired = {}
+        if restored and all(r.get('format_name') == '출고프로그램 통합 양식' for r in restored):
+            by_row = {r['source_row']: r for r in restored}
+            for entry in entries:
+                original = by_row.get(entry['data'].get('source_row'))
+                if original and identity(original['order_no']) == identity(entry['data'].get('order_no')):
+                    if original != entry['data']:
+                        repaired[entry['id']] = original
+                        entry['data'] = original
         results = reconcile([r['data'] for r in entries], remote_rows)
         stamp = now()
         with self.db:
+            for rid, data in repaired.items():
+                self.db.execute('UPDATE tracking_rows SET data=?,order_id=NULL WHERE id=?', (encode(data), rid))
             self.db.execute('INSERT INTO tracking_queries VALUES(?,?,?,?,?,?)',
                             (uuid.uuid4().hex, job_id, start, end, encode(remote_rows), stamp))
             for entry, result in zip(entries, results):

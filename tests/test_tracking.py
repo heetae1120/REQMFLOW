@@ -2,6 +2,7 @@ import io
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -27,7 +28,8 @@ class MatcherTests(unittest.TestCase):
         result = reconcile([ORDER], [{**REMOTE, 'recipient': '테스트수령인', 'phone': '+82-10-1234-5678'}])[0]
         self.assertEqual((result['state'], result['tracking']), ('matched', REMOTE['tracking']))
         result = reconcile([ORDER], [{**REMOTE, 'order_no': '0001AB'}])[0]
-        self.assertEqual(result['state'], 'not_found')
+        self.assertEqual(result['state'], 'review')
+        self.assertEqual(result['tracking'], '')
 
     def test_wrong_or_missing_delivery_data_never_fills_invoice(self):
         for key in ('recipient', 'phone', 'postcode', 'address'):
@@ -43,12 +45,53 @@ class MatcherTests(unittest.TestCase):
     def test_delivery_peers_are_not_automatically_treated_as_combined_packages(self):
         second = {**ORDER, 'order_no': 'O2'}
         results = reconcile([ORDER, second], [REMOTE])
-        self.assertEqual([r['state'] for r in results], ['matched', 'not_found'])
+        self.assertEqual([r['state'] for r in results], ['matched', 'review'])
+
+    def test_marketplace_product_order_number_is_verified_with_delivery(self):
+        result = reconcile([ORDER], [{**REMOTE, 'order_no': ORDER['line_no'], 'line_no': ''}])[0]
+        self.assertEqual(result['state'], 'matched')
+        self.assertIn('상품주문번호', result['reason'])
+        self.assertEqual(reconcile([ORDER], [{**REMOTE, 'order_no': ORDER['line_no'], 'phone': '01099999999'}])[0]['state'], 'review')
 
     def test_manual_number_validation(self):
         self.assertEqual(manual_invoice('0012-3456-7890'), '001234567890')
         for value in ('123', '123456789a', '12345678;99999999', '=1234567890'):
             with self.assertRaises(ValueError): manual_invoice(value)
+
+    def test_same_order_number_in_different_markets_requires_marketplace_evidence(self):
+        orders = [ORDER, {**ORDER, 'channel': '지마켓'}]
+        self.assertEqual([r['state'] for r in reconcile(orders, [{**REMOTE, 'channel': ''}])], ['review', 'review'])
+
+    def test_collect_visits_numbered_pages_with_image_arrow(self):
+        from reqm_local.wekeep_tracking import collect_tracking, TABLE_SCRIPT
+        class Link:
+            def __init__(self, driver): self.driver = driver
+            def is_displayed(self): return True
+            def is_enabled(self): return True
+            def get_attribute(self, key): return ''
+            def click(self): self.driver.page += 1
+        class Driver:
+            page = 0
+            def find_elements(self, by, value):
+                return [object()] if 'option[value=' in value else []
+            def execute_script(self, script, *args):
+                if script == TABLE_SCRIPT:
+                    return {'headers': ['판매처주문번호', '송장번호', '주문등록일'],
+                            'rows': [[f'O{self.page}', '001234567890', '26.10.06']], 'detailIds': ['']}
+                if 'ul.pagination' in script:
+                    self.script = script
+                    return [Link(self)] if self.page < 3 else []
+        class Wait:
+            def __init__(self, driver, timeout): self.driver = driver
+            def until(self, condition):
+                result = condition(self.driver)
+                assert result
+                return result
+        driver = Driver()
+        with patch('reqm_local.wekeep_tracking.enrich_delivery', side_effect=lambda d, rows, *_: rows):
+            rows = collect_tracking(driver, '2026-10-06', '2026-10-06', 'b2c', wait_factory=Wait)
+        self.assertEqual([r['order_no'] for r in rows], ['O0', 'O1', 'O2', 'O3'])
+        self.assertIn('img[alt=', driver.script)
 
     def test_remote_file_and_detail_parsers(self):
         headers = ['판매처주문번호', '수령자', '핸드폰', '우편번호', '주소', '상세주소', '송장번호']
@@ -86,6 +129,23 @@ class TrackingStoreTests(unittest.TestCase):
 
     def job(self):
         return self.s.import_tracking_files([self.path], DAY, channel_override='오늘의집')[0][0]
+
+    def test_combined_shipping_file_keeps_per_row_marketplaces_and_repairs_old_import(self):
+        values = [[ORDER['order_no'], channel, ORDER['product'], '1', ORDER['recipient'],
+                   ORDER['phone'], ORDER['postcode'], ORDER['address'], '', ''] for channel in ('오늘의집', '지마켓')]
+        self.path.write_bytes(workbook_bytes(HEADERS[:10], values))
+        job = self.s.import_tracking_files([self.path], DAY)[0][0]
+        rows = self.s.tracking_rows(job)
+        self.assertEqual([r['data']['channel'] for r in rows], ['오늘의집', '지마켓'])
+        self.assertTrue(all(r['data']['phone'] == ORDER['phone'] for r in rows))
+        for r in rows:
+            wrong = {**r['data'], 'channel': '이알아이', 'phone': '', 'recipient': ''}
+            with self.s.db:
+                self.s.db.execute('UPDATE tracking_rows SET data=? WHERE id=?', (encode(wrong), r['id']))
+        self.s.apply_tracking_query(job, [{**REMOTE, 'channel': ''}], DAY, DAY)
+        rows = self.s.tracking_rows(job)
+        self.assertEqual([r['data']['channel'] for r in rows], ['오늘의집', '지마켓'])
+        self.assertEqual([r['state'] for r in rows], ['review', 'review'])
 
     def query(self, job, remote=None):
         self.s.apply_tracking_query(job, [REMOTE] if remote is None else remote, DAY, DAY)
