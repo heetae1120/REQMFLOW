@@ -69,10 +69,11 @@ jobs:
           $manifest = @{version=$env:RELEASE_VERSION; file="https://github.com/heetae1120/REQMFLOW/releases/download/v$env:RELEASE_VERSION/REQM_FLOW.exe"; sha256=$hash} | ConvertTo-Json
           [IO.File]::WriteAllText("$pwd/latest.json", $manifest, [Text.UTF8Encoding]::new($false))
           $releaseTag = "v$env:RELEASE_VERSION"
-          $releaseExists = $false
-          gh release download $releaseTag --pattern latest.json --dir release-reference
-          if ($LASTEXITCODE -eq 0) {
-            $releaseExists = $true
+          $releaseList = gh release list --limit 100 --json tagName | ConvertFrom-Json
+          $releaseExists = @($releaseList | Where-Object { $_.tagName -eq $releaseTag }).Count -gt 0
+          if ($releaseExists) {
+            gh release download $releaseTag --pattern latest.json --dir release-reference
+            if ($LASTEXITCODE -ne 0) { throw 'Could not download the existing release manifest' }
             gh release download $releaseTag --pattern REQM_FLOW.exe --dir release-reference
             if ($LASTEXITCODE -ne 0) { throw 'Could not download the already-published executable' }
             $published = Get-Content release-reference/latest.json -Raw | ConvertFrom-Json
