@@ -30,9 +30,9 @@ class UpdateChannelTests(unittest.TestCase):
             self.assertIsNone(latest_release('1.9.31'))
             self.assertEqual(read.call_count,1)
 
-    def test_missing_github_hash_falls_back_to_existing_supabase_channel(self):
+    def test_missing_github_hash_falls_back_to_github_manifest(self):
         mirror={'version':'1.9.31','file':'1.9.31/REQM_FLOW.exe','sha256':'b'*64}
         with patch('reqm_local.updater._read_json',side_effect=[{'tag_name':'v1.9.31','assets':[]},mirror]):
             result=latest_release('1.9.30',config={'supabase_url':'https://demo.supabase.co'})
         self.assertEqual(result['sha256'],'b'*64)
-        self.assertEqual(result['exe_url'],'https://demo.supabase.co/storage/v1/object/public/reqm-updates/desktop/1.9.31/REQM_FLOW.exe')
+        self.assertEqual(result['exe_url'],'https://github.com/heetae1120/REQMFLOW/releases/latest/download/1.9.31/REQM_FLOW.exe')

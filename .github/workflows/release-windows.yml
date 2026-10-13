@@ -39,11 +39,11 @@ jobs:
           Copy-Item dist/REQM_FLOW.exe REQM_FLOW.exe
           $hash = (Get-FileHash REQM_FLOW.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText("$pwd/REQM_FLOW.exe.sha256", "$hash  REQM_FLOW.exe" + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
-          $manifest = @{version='1.9.30'; file='https://github.com/heetae1120/REQMFLOW/releases/download/v1.9.30/REQM_FLOW.exe'; sha256=$hash} | ConvertTo-Json
+          $manifest = @{version='1.9.34'; file='https://github.com/heetae1120/REQMFLOW/releases/download/v1.9.34/REQM_FLOW.exe'; sha256=$hash} | ConvertTo-Json
           [IO.File]::WriteAllText("$pwd/latest.json", $manifest, [Text.UTF8Encoding]::new($false))
       - uses: actions/upload-artifact@v4
         with:
-          name: REQM-FLOW-v1.9.30
+          name: REQM-FLOW-v1.9.34
           path: |
             REQM_FLOW.exe
             REQM_FLOW.exe.sha256
@@ -53,4 +53,4 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create v1.9.30 REQM_FLOW.exe REQM_FLOW.exe.sha256 latest.json --title "REQM FLOW 1.9.30" --notes-file RELEASE_NOTES_1.9.30.md --target "${{ github.sha }}"
+        run: gh release create v1.9.34 REQM_FLOW.exe REQM_FLOW.exe.sha256 latest.json --title "REQM FLOW 1.9.34" --notes-file RELEASE_NOTES_1.9.34.md --target "${{ github.sha }}"

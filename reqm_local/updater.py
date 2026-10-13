@@ -21,6 +21,7 @@ UPDATE_PREFIX = 'desktop'
 MANIFEST_NAME = 'latest.json'
 EXE_NAME = 'REQM_FLOW.exe'
 GITHUB_LATEST_URL = 'https://api.github.com/repos/heetae1120/REQMFLOW/releases/latest'
+GITHUB_MANIFEST_URL = 'https://github.com/heetae1120/REQMFLOW/releases/latest/download/latest.json'
 
 
 def version_tuple(value):
@@ -34,13 +35,7 @@ def version_tuple(value):
 
 def update_manifest_url(config=None):
     config=config or load_cloud_config()
-    base=str(config.get('supabase_url','')).rstrip('/')
-    bucket=str(config.get('update_bucket',UPDATE_BUCKET)).strip('/')
-    prefix=str(config.get('update_prefix',UPDATE_PREFIX)).strip('/')
-    if not base:
-        raise RuntimeError('config.json에 Supabase URL이 필요합니다.')
-    path='/'.join(filter(None,(prefix,MANIFEST_NAME)))
-    return f'{base}/storage/v1/object/public/{bucket}/{path}'
+    return str(config.get('update_manifest_url') or GITHUB_MANIFEST_URL).strip()
 
 
 def _read_json(url, timeout):
@@ -79,7 +74,7 @@ def latest_release(current_version, timeout=8, config=None):
     filename=str(payload.get('file','')).strip().lstrip('/')
     checksum=str(payload.get('sha256','')).strip().lower()
     if not filename or '..' in filename.split('/') or '\\' in filename or not re.fullmatch(r'[0-9a-f]{64}',checksum):
-        raise ValueError('Supabase 업데이트 정보가 올바르지 않습니다.')
+        raise ValueError('GitHub 업데이트 정보가 올바르지 않습니다.')
     exe_url=urllib.parse.urljoin(manifest_url,filename) if not filename.startswith(('http://','https://')) else filename
     return {'version':version,'exe_url':exe_url,'sha256':checksum}
 

@@ -931,12 +931,16 @@ class Operations(TrackingOperations):
                 if len(parts)>1 and parts[1]:smartstore_ids.append(parts[1])
             elif text:
                 shipment_ids.append(text)
-        found_shipments=[];found_smartstore=[]
+        found_shipments=[];shipment_order_ids=[];found_smartstore=[]
         if shipment_ids:
             marks=','.join('?' for _ in shipment_ids)
-            found_shipments=[row['id'] for row in self.db.execute(
-                f'SELECT id FROM shipments WHERE id IN ({marks})',shipment_ids,
-            )]
+            selected=self.db.execute(f'''SELECT s.id,r.order_id FROM shipments s
+                JOIN request_lines r ON r.id=s.line_id WHERE s.id IN ({marks})''',shipment_ids).fetchall()
+            shipment_order_ids=list(dict.fromkeys(row['order_id'] for row in selected))
+            if shipment_order_ids:
+                order_marks=','.join('?' for _ in shipment_order_ids)
+                found_shipments=[row['id'] for row in self.db.execute(f'''SELECT s.id FROM shipments s
+                    JOIN request_lines r ON r.id=s.line_id WHERE r.order_id IN ({order_marks})''',shipment_order_ids)]
         if smartstore_ids:
             smartstore_ids=list(dict.fromkeys(smartstore_ids));marks=','.join('?' for _ in smartstore_ids)
             found_smartstore=[row['id'] for row in self.db.execute(
@@ -954,8 +958,8 @@ class Operations(TrackingOperations):
                     f'DELETE FROM smartstore_purchase_rows WHERE smartstore_erp_id IN ({marks})',found_smartstore,
                 )
                 self.db.execute(f'DELETE FROM smartstore_erp_rows WHERE id IN ({marks})',found_smartstore)
-            self.event('실제 출고 주문 삭제',f'일반 {len(found_shipments)}건 · 스마트스토어 {len(found_smartstore)}건')
-        return len(found_shipments)+len(found_smartstore)
+            self.event('실제 출고 주문 삭제',f'일반 주문 {len(shipment_order_ids)}건 · 스마트스토어 주문 {len(found_smartstore)}건')
+        return len(shipment_order_ids)+len(found_smartstore)
 
     def delete_esm_erp_entries(self, entry_ids):
         row_ids=list(dict.fromkeys(

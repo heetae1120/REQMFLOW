@@ -22,7 +22,7 @@ from reqm_local.ui_helpers import (
 )
 from reqm_local.workspace_cloud import export_workspace, import_workspace, workspace_digest
 from reqm_local import cloud
-from reqm_local.updater import UPDATE_BUCKET, prepare_update, update_manifest_url, version_tuple
+from reqm_local.updater import GITHUB_MANIFEST_URL, UPDATE_BUCKET, prepare_update, update_manifest_url, version_tuple
 from reqm_local.desktop import (
     COMPLETED_ORDER_STATES, FIELD_LABELS, MAPPING_FIELD_ORDER, amount_split_totals, calendar_month_days,
     matching_header_row_number,
@@ -229,10 +229,8 @@ class LocalTests(unittest.TestCase):
         self.assertGreater(version_tuple('v1.10.0'),version_tuple('1.9.9'))
         self.assertEqual(version_tuple('1.4'),(1,4,0))
         self.assertEqual(UPDATE_BUCKET,'reqm-updates')
-        self.assertEqual(
-            update_manifest_url({'supabase_url':'https://demo.supabase.co'}),
-            'https://demo.supabase.co/storage/v1/object/public/reqm-updates/desktop/latest.json',
-        )
+        self.assertEqual(update_manifest_url({'supabase_url':'https://demo.supabase.co'}),GITHUB_MANIFEST_URL)
+        self.assertEqual(update_manifest_url({'update_manifest_url':'https://updates.example/latest.json'}),'https://updates.example/latest.json')
 
     def test_cloud_config_has_packaged_public_fallback(self):
         original=cloud.config_candidates
@@ -243,7 +241,7 @@ class LocalTests(unittest.TestCase):
             cloud.config_candidates=original
         self.assertEqual(config['supabase_url'],'https://jcslohuraqclhryeqxoc.supabase.co')
         self.assertTrue(config['supabase_publishable_key'].startswith('sb_publishable_'))
-        self.assertEqual(update_manifest_url(config),'https://jcslohuraqclhryeqxoc.supabase.co/storage/v1/object/public/reqm-updates/desktop/latest.json')
+        self.assertEqual(update_manifest_url(config),GITHUB_MANIFEST_URL)
 
     def test_updater_verifies_and_extracts_release_package(self):
         import hashlib
@@ -912,6 +910,21 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(len(self.s.esm_erp_entries('2026-10-07')),1)
         self.assertEqual(self.s.delete_esm_erp_entries(['ESM:esm-delete']),1)
         self.assertEqual(self.s.esm_erp_entries('2026-10-07'),[])
+
+    def test_deleting_one_confirmed_component_removes_entire_order_from_later_erp_steps(self):
+        _,order=self.import_order(q=1,amount=10000,line='DELETE-WHOLE-ORDER')
+        self.s.set_mapping(order['id'],[
+            dict(code='QWC-Q3100S-BK',logistics_code='QWC-Q3100S-BK',name='삭제 구성품 A',quantity=1,unit_amount=6000,warehouse='300',customer='AC008600'),
+            dict(code='QWC-Q3100S-WH',logistics_code='QWC-Q3100S-WH',name='삭제 구성품 B',quantity=1,unit_amount=4000,warehouse='300',customer='AC008600'),
+        ])
+        self.s.request([order['id']],'2026-10-08',self.folder/'delete-whole-request.xlsx')
+        self.s.auto_import_shipments('2026-10-08')
+        entries=self.s.confirmed_erp_entries('2026-10-08')
+        self.assertEqual(len(entries),2)
+        self.assertEqual(len(self.s.pending_amount_splits('2026-10-08')),1)
+        self.assertEqual(self.s.delete_confirmed_erp_entries([entries[0]['id']]),1)
+        self.assertEqual(self.s.confirmed_erp_entries('2026-10-08'),[])
+        self.assertEqual(self.s.pending_amount_splits('2026-10-08'),[])
 
     def test_actual_and_esm_views_filter_inclusive_date_ranges(self):
         _,first=self.import_order(line='RANGE-1');first_line=self.request(first)

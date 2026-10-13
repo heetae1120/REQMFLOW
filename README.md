@@ -30,8 +30,4 @@ python tools/build_portable.py
 
 `config.example.json`을 `config.json`으로 복사한 뒤 필요한 Supabase 공개 설정값을 입력합니다. 실제 비밀번호와 비밀키는 커밋하지 않습니다.
 
-Windows 배포본은 Supabase Storage의 `reqm-updates` 저장소를 확인해 SHA-256 검증된 새 `REQM_FLOW.exe`만 자동으로 교체합니다. 최초 구성과 게시 방법은 `LOCAL_PROGRAM.md`의 업데이트 항목을 참고하세요.
-
-## 1.9.31 업데이트 배포
-
-업데이트는 `heetae1120/REQMFLOW`의 GitHub 최신 릴리스를 우선 확인합니다. 기존 버전의 Supabase 업데이트 경로도 같은 검증 실행파일을 제공하며, GitHub 조회 실패 시 호환 경로로 사용합니다. ZIP 및 EXE 다운로드와 SHA-256 검증 파일을 함께 제공합니다.
+Windows 배포본은 GitHub Releases의 최신 정보를 확인해 SHA-256 검증된 새 `REQM_FLOW.exe`만 자동으로 교체합니다. 최초 구성과 게시 방법은 `LOCAL_PROGRAM.md`의 업데이트 항목을 참고하세요.

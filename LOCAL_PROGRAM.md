@@ -70,8 +70,8 @@ python reqm_local_app.py
 ## 검색·드래그·로컬 DB·업데이트
 
 - `주문 · 출고요청 > 판매처 주문 파일`의 작업일을 선택하면 그 날짜에 등록·출고요청·실제출고된 주문만 표시됩니다. 판매처 버튼의 초록색 입력 완료 표시도 선택 작업일에 파일을 등록한 경우에만 켜집니다. 선택 날짜로 파일을 입력하면 주문에 해당 등록일이 저장됩니다.
-- 배포 담당자는 Supabase SQL Editor에서 `003_reqm_app_updates.sql`을 한 번 실행해 공개 다운로드 전용 `reqm-updates` 저장소를 만듭니다. 새 빌드 후 `REQM_UPDATE_EMAIL`, `REQM_UPDATE_PASSWORD`를 설정하고 `python tools/publish_supabase_update.py 1.9.11`처럼 실행하면 버전별 단일 EXE와 SHA-256이 업로드된 뒤 `latest.json`이 마지막에 교체됩니다.
-- 작업자 프로그램은 Supabase의 `latest.json`을 확인하고 검증된 `REQM_FLOW.exe` 하나만 교체합니다. 주문 DB와 설정은 `%LOCALAPPDATA%/REQM-Local`에 유지됩니다. GitHub는 최초 설치용 공개 단일 EXE, Supabase는 프로그램 내부 자동 업데이트용으로 사용합니다.
+- 공식 `main`에 새 버전을 반영하면 GitHub Actions가 테스트와 Windows 단일 EXE 빌드를 수행하고 GitHub Releases에 `REQM_FLOW.exe`, `REQM_FLOW.exe.sha256`, `latest.json`을 게시합니다.
+- 작업자 프로그램은 GitHub Releases의 `latest.json`을 확인하고 SHA-256 검증된 `REQM_FLOW.exe` 하나만 교체합니다. 주문 DB와 설정은 `%LOCALAPPDATA%/REQM-Local`에 유지되며 Supabase Storage는 프로그램 업데이트에 사용하지 않습니다.
 
 - 주문 검색어를 입력하면 현재 주문값과 주문·상품·금액·배송 등 관련 표현을 연관검색 버튼으로 표시합니다. 한글 조합 중 입력값을 강제로 바꾸지 않습니다.
 - 표에서 마우스를 누른 채 행 위로 드래그하면 바탕화면처럼 연속 범위를 선택합니다. 마우스 가운데 버튼으로 끌면 표를 상하좌우로 이동합니다.

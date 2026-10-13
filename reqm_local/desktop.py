@@ -35,7 +35,7 @@ from .shipping import compact
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.33'
+APP_VERSION = '1.9.34'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -366,6 +366,7 @@ class Desktop:
         erp_frame = ttk.Frame(result_tabs,padding=20)
         self.erp_ship_from = tk.StringVar(value=date.today().isoformat())
         self.erp_ship_through = tk.StringVar(value=date.today().isoformat())
+        self.erp_ship_customer = tk.StringVar(value='전체 거래처')
         self.erp_ship_day = tk.StringVar(value=date.today().isoformat())
         self.erp_amount_from = tk.StringVar(value=date.today().isoformat())
         self.erp_amount_through = tk.StringVar(value=date.today().isoformat())
@@ -384,6 +385,12 @@ class Desktop:
         self.date_picker(confirmed_line,self.erp_ship_from,'실제 출고 조회 시작일').pack(side='left',padx=6)
         ttk.Label(confirmed_line,text='~').pack(side='left')
         self.date_picker(confirmed_line,self.erp_ship_through,'실제 출고 조회 종료일').pack(side='left',padx=6)
+        ttk.Label(confirmed_line,text='거래처').pack(side='left',padx=(12,4))
+        self.erp_ship_customer_box=ttk.Combobox(
+            confirmed_line,textvariable=self.erp_ship_customer,state='readonly',width=18,values=['전체 거래처'],
+        )
+        self.erp_ship_customer_box.pack(side='left',padx=(0,6))
+        self.erp_ship_customer_box.bind('<<ComboboxSelected>>',lambda _event:self.safe(self.refresh_confirmed_shipments))
         self.button(confirmed_line,'기간 조회',self.refresh_actual_erp_day,style='Accent.TButton')
         result_card = ttk.LabelFrame(result_input,text='입력 파일',padding=18)
         result_card.pack(fill='x')
@@ -1953,7 +1960,16 @@ class Desktop:
         start=date.fromisoformat(self.erp_ship_from.get()).isoformat()
         end=date.fromisoformat(self.erp_ship_through.get()).isoformat()
         if start>end:raise ValueError('조회 시작일은 종료일보다 늦을 수 없습니다.')
-        for index,entry in enumerate(self.service.confirmed_erp_entries(start,end)):
+        entries=self.service.confirmed_erp_entries(start,end)
+        customers=sorted({INTERNAL_TO_CHANNEL.get(entry['channel'],entry['channel']) for entry in entries})
+        choices=['전체 거래처',*customers]
+        self.erp_ship_customer_box.configure(values=choices)
+        if self.erp_ship_customer.get() not in choices:
+            self.erp_ship_customer.set('전체 거래처')
+        selected_customer=self.erp_ship_customer.get()
+        if selected_customer!='전체 거래처':
+            entries=[entry for entry in entries if INTERNAL_TO_CHANNEL.get(entry['channel'],entry['channel'])==selected_customer]
+        for index,entry in enumerate(entries):
             item_id=f'confirmed-{index}';self.confirmed_entry_ids[item_id]=entry['id']
             self.confirmed_shipments.insert('', 'end', iid=item_id, values=[
                 entry['source'],entry['day'],INTERNAL_TO_CHANNEL.get(entry['channel'],entry['channel']),
