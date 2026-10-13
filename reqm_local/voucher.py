@@ -44,7 +44,7 @@ class VoucherOperations:
             self.db.execute('INSERT OR REPLACE INTO mappings VALUES(?,?)',(PREFIX+'family:'+code,json.dumps([family],ensure_ascii=False)))
             self.event('전표 색상 공유 그룹 변경',code)
 
-    def voucher_rows(self, start, end, include_exported=False):
+    def voucher_rows(self, start, end, include_exported=False, include_requests=False):
         from .service import day
         start, end = day(start), day(end)
         if start > end:
@@ -72,6 +72,22 @@ class VoucherOperations:
             group['full'] = len(group['components']) == len(definitions) and all(
                 Decimal(str(c['quantity'])) == Decimal(str(definitions[c['index']]['quantity']))
                 for c in group['components'])
+        if include_requests:
+            for line in self.db.execute('''SELECT r.*,q.day FROM request_lines r
+                JOIN requests q ON q.id=r.request_id
+                WHERE q.day BETWEEN ? AND ? AND NOT EXISTS
+                (SELECT 1 FROM shipments s WHERE s.line_id=r.id) ORDER BY q.day,r.rowid''',(start,end)):
+                order=orders[line['order_id']]
+                from .service import is_smartstore_channel
+                if self.smartstore_erp_enabled() and is_smartstore_channel(order['data'].get('channel')):
+                    continue
+                key='request:'+line['order_id']+':'+line['day']
+                group=groups.setdefault(key,{'id':key,'kind':'request','day':line['day'],
+                    'order_id':line['order_id'],'data':order['data'],'components':[],
+                    'exported':False,'confirmed':False,'issue':'출고 확인 필요','full':False})
+                c=order['components'][line['component']]
+                group['components'].append({**c,'index':line['component'],'entry_id':line['id'],
+                                            'quantity':line['qty']})
         for table, kind in (('smartstore_erp_rows', 'smartstore'), ('esm_erp_rows', 'esm')):
             for row in self.db.execute(f'SELECT * FROM {table} WHERE day BETWEEN ? AND ? ORDER BY day,rowid', (start, end)):
                 data = json.loads(row['data'])
@@ -88,6 +104,21 @@ class VoucherOperations:
             group['total'] = sum((Decimal(str(c['amount'] or '0')) for c in group['components']), Decimal(0))
             result.append(group)
         return result
+
+    def confirm_voucher_requests(self, row_ids, shipping_day):
+        from .service import day
+        shipping_day=day(shipping_day)
+        rows={r['id']:r for r in self.voucher_rows('0001-01-01','9999-12-31',include_requests=True) if r['kind']=='request'}
+        if not row_ids or any(key not in rows for key in row_ids):
+            raise ValueError('출고요청 목록이 변경되었습니다. 다시 조회하세요.')
+        added=0
+        with self.db:
+            for key in dict.fromkeys(row_ids):
+                for component in rows[key]['components']:
+                    line=self.db.execute('SELECT * FROM request_lines WHERE id=?',(component['entry_id'],)).fetchone()
+                    if self._record_shipment(line,shipping_day,line['qty'],'')=='added':added+=1
+            self.event('전표 작업표 선택 출고 확정',f'{shipping_day}: {added}개 구성품')
+        return added
 
     def voucher_rule_key(self, row, total):
         from .service import display_channel

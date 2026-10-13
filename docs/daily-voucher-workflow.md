@@ -5,6 +5,12 @@ shipments through the existing shipment screen first; generating a WeKeep
 request or obtaining an invoice alone does not create a voucher shipment.
 Select the shipment date range and the separate voucher date, then review
 seller, item code/name, shipped quantity, amount and confirmation status.
+The initial date range is the last seven days. Previously generated rows are
+visible by default with an explicit exported status and are read-only.
+Unconfirmed requests appear by request date but cannot be exported; selected
+requests can be confirmed with an explicitly entered actual shipment date.
+Unmapped SmartStore rows display the original product, quantity and amount
+and open the existing matching dialog when double-clicked.
 Search includes order numbers and recipients; these remain in the stored
 source data and the amount dialog rather than taking space in the main table.
 

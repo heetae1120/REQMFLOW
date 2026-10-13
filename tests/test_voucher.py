@@ -184,3 +184,38 @@ class VoucherTests(unittest.TestCase):
             import_workspace(other,export_workspace(self.s))
             self.assertEqual(other.voucher_family(code),'sku:'+code)
         finally:other.close()
+
+    def test_requests_are_visible_before_confirmation_without_becoming_erp_rows(self):
+        a=self.order()
+        with self.s.db:
+            self.s.db.execute('DELETE FROM shipments')
+            self.s.db.execute("UPDATE orders SET state='출고 요청'")
+        before=workspace_digest(export_workspace(self.s))
+        rows=self.s.voucher_rows(DAY,DAY,include_requests=True)
+        self.assertEqual(len(rows),1);self.assertEqual(rows[0]['kind'],'request')
+        self.assertEqual(len(rows[0]['components']),2)
+        self.assertEqual(workspace_digest(export_workspace(self.s)),before)
+        with self.assertRaises(ValueError):self.s.export_erp(DAY,DAY,None,from_day=DAY,preview=True)
+        self.assertEqual(self.s.confirm_voucher_requests([rows[0]['id']],'2026-10-09'),2)
+        self.assertEqual(self.s.voucher_rows('2026-10-09','2026-10-09')[0]['kind'],'shipment')
+        with self.assertRaises(ValueError):self.s.confirm_voucher_requests([rows[0]['id']],'2026-10-09')
+
+    def test_unmapped_smartstore_shows_source_product_and_quantity(self):
+        import os,tkinter as tk
+        from unittest.mock import patch
+        from reqm_local.desktop import Desktop
+        data={**ORDER,'channel':'스마트스토어','amount':'10000','shipping':'0'}
+        with self.s.db:
+            self.s.db.execute('INSERT INTO smartstore_erp_rows(id,identity,day,data,components,issue) VALUES(?,?,?,?,?,?)',
+                              ('UNMAPPED','UNMAPPED',DAY,encode(data),'[]','상품 매칭 필요'))
+        root=tk.Tk();root.withdraw()
+        try:
+            with patch.dict(os.environ,{'REQM_SELF_TEST':'1'}):app=Desktop(root,self.s)
+            panel=app.voucher_panel;panel.start.set(DAY);panel.end.set(DAY);panel.refresh()
+            key=panel.tree.get_children()[0]
+            self.assertEqual(panel.tree.set(key,'품목명'),data['product'])
+            self.assertEqual(panel.tree.set(key,'수량'),data['quantity'])
+            panel.tree.selection_set(key)
+            with patch.object(app,'edit_erp_set') as mapping:
+                panel.edit();mapping.assert_called_once()
+        finally:root.destroy()
