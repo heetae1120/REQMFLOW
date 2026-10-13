@@ -1,21 +1,42 @@
 name: Build and release REQM FLOW
-# Verify the supported Windows font fallback as well as the bundled asset.
+
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (for example 1.9.42); blank uses APP_VERSION
+        required: false
+        type: string
   push:
     branches: [main]
     paths: ['.github/workflows/release-windows.yml']
+
 permissions:
   contents: write
+
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Select and validate release version
+        id: release
+        shell: pwsh
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          $source = Get-Content reqm_local/desktop.py -Raw
+          $match = [regex]::Match($source, "APP_VERSION\s*=\s*'([^']+)'")
+          if (-not $match.Success) { throw 'Could not read APP_VERSION' }
+          $version = if ($env:VERSION_INPUT) { $env:VERSION_INPUT.Trim() } else { $match.Groups[1].Value }
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid release version: $version" }
+          if ($version -ne $match.Groups[1].Value) { throw 'Workflow version must match APP_VERSION' }
+          if (-not (Test-Path "RELEASE_NOTES_$version.md")) { throw "Missing release notes for $version" }
+          "version=$version" >> $env:GITHUB_OUTPUT
       - name: Install dependencies
         run: python -m pip install -r requirements-local.txt pyinstaller
       - name: Regression tests
@@ -28,22 +49,26 @@ jobs:
           $testDir = Join-Path $env:RUNNER_TEMP 'flow-smoke'
           $process = Start-Process -FilePath 'dist/REQM_FLOW.exe' -ArgumentList @('--self-test', $testDir) -PassThru
           if (-not $process.WaitForExit(180000)) { $process.Kill(); throw 'Packaged test timed out' }
+          if ($process.ExitCode -ne 0) { throw 'Packaged test failed' }
           $report = Join-Path $testDir 'self-test.json'
           if (-not (Test-Path $report)) { throw 'Missing packaged test report' }
           Get-Content $report
           $result = Get-Content $report -Raw | ConvertFrom-Json
           if (-not $result.ok) { throw 'Packaged test failed' }
-      - name: Prepare release
+          if ($result.version -ne '${{ steps.release.outputs.version }}') { throw 'Packaged version mismatch' }
+      - name: Prepare release assets
         shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
           Copy-Item dist/REQM_FLOW.exe REQM_FLOW.exe
           $hash = (Get-FileHash REQM_FLOW.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText("$pwd/REQM_FLOW.exe.sha256", "$hash  REQM_FLOW.exe" + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
-          $manifest = @{version='1.9.34'; file='https://github.com/heetae1120/REQMFLOW/releases/download/v1.9.34/REQM_FLOW.exe'; sha256=$hash} | ConvertTo-Json
+          $manifest = @{version=$env:RELEASE_VERSION; file="https://github.com/heetae1120/REQMFLOW/releases/download/v$env:RELEASE_VERSION/REQM_FLOW.exe"; sha256=$hash} | ConvertTo-Json
           [IO.File]::WriteAllText("$pwd/latest.json", $manifest, [Text.UTF8Encoding]::new($false))
       - uses: actions/upload-artifact@v4
         with:
-          name: REQM-FLOW-v1.9.34
+          name: REQM-FLOW-v${{ steps.release.outputs.version }}
           path: |
             REQM_FLOW.exe
             REQM_FLOW.exe.sha256
@@ -53,4 +78,5 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create v1.9.34 REQM_FLOW.exe REQM_FLOW.exe.sha256 latest.json --title "REQM FLOW 1.9.34" --notes-file RELEASE_NOTES_1.9.34.md --target "${{ github.sha }}"
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: gh release create "v$env:RELEASE_VERSION" REQM_FLOW.exe REQM_FLOW.exe.sha256 latest.json --title "REQM FLOW $env:RELEASE_VERSION" --notes-file "RELEASE_NOTES_$env:RELEASE_VERSION.md" --target "${{ github.sha }}"

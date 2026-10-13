@@ -12,6 +12,97 @@ from tests.test_tracking import ORDER, DAY, REFERENCE
 
 
 class VoucherTests(unittest.TestCase):
+    def test_live_allocation_remaining_equal_excess_and_invalid(self):
+        from reqm_local.voucher import allocation_feedback
+        self.assertIn('남은 금액 8,400원',allocation_feedback('36,900',['28,500',''])[0])
+        self.assertTrue(allocation_feedback('36,900',['28,500','8,400'])[2])
+        self.assertIn('초과 금액 100원',allocation_feedback('36,900',['28,500','8,500'])[0])
+        for value in ('-1','NaN','Infinity','1.5','문자'):
+            with self.assertRaises(ValueError):allocation_feedback(36900,[value])
+
+    def test_price_review_quantity_scaling_reason_and_export(self):
+        a=self.order();self.s.set_voucher_amounts(a['id'],34900,[28000,6900])
+        scaled=self.order('S',total=69800,qty=2)
+        self.assertFalse(self.s.voucher_review(scaled,69800,[56000,13800]))
+        changed=self.order('B',total=33900)
+        self.assertIn('가격 차이 확인',self.s.voucher_review(changed)[0])
+        self.assertIsNone(self.s.voucher_suggestion(changed))
+        with self.assertRaisesRegex(ValueError,'확인 사유'):
+            self.s.set_voucher_amounts(changed['id'],33900,[27000,6900])
+        self.s.set_voucher_amounts(changed['id'],33900,[27000,6900],review_reason='행사 할인 1,000원 확인')
+        self.s.set_voucher_amounts(scaled['id'],69800,[56000,13800])
+        self.s.export_erp(DAY,DAY,None,from_day=DAY,preview=True)
+        updated=next(r for r in self.s.voucher_rows(DAY,DAY) if r['id']==changed['id'])
+        self.assertFalse(self.s.voucher_review_pending(updated))
+        other=Operations(self.folder/'other',REFERENCE)
+        try:
+            import_workspace(other,export_workspace(self.s))
+            copied=next(r for r in other.voucher_rows(DAY,DAY) if r['id']==changed['id'])
+            self.assertFalse(other.voucher_review_pending(copied))
+        finally:other.close()
+
+    def test_export_blocks_unreviewed_source_change_without_writes(self):
+        a=self.order();self.s.set_voucher_amounts(a['id'],34900,[28000,6900])
+        data={**a['data'],'amount':'35900'}
+        with self.s.db:self.s.db.execute('UPDATE orders SET data=? WHERE id=?',(encode(data),a['order_id']))
+        before=workspace_digest(export_workspace(self.s))
+        with self.assertRaisesRegex(ValueError,'원본 금액 불일치'):
+            self.s.export_erp(DAY,DAY,self.folder/'blocked.xlsx',from_day=DAY)
+        self.assertEqual(workspace_digest(export_workspace(self.s)),before)
+        self.assertFalse((self.folder/'blocked.xlsx').exists())
+
+    def test_review_does_not_compare_other_channels_models_partial_or_future(self):
+        a=self.order();self.s.set_voucher_amounts(a['id'],34900,[28000,6900])
+        b=self.order('B',total=33900,channel='무신사')
+        self.assertFalse(self.s.voucher_review(b))
+        changed={**a,'id':'new','total':Decimal(33900),'components':[dict(c) for c in a['components']]}
+        changed['components'][0]['amount']='27000'
+        changed['components'][1]['amount']='6900'
+        changed['data']={**a['data'],'amount':'33900'}
+        self.assertFalse(self.s.voucher_review({**changed,'full':False}))
+        self.assertFalse(self.s.voucher_review(changed,history=[{**a,'day':'2099-01-01'}]))
+        changed['components'][0]['code']='[RQM]-QP1000C1-WH'
+        self.assertFalse(self.s.voucher_review(changed))
+
+    def test_amount_dialog_updates_remaining_and_save_state(self):
+        import os,tkinter as tk
+        from tkinter import ttk
+        from unittest.mock import patch
+        from reqm_local.desktop import Desktop
+        a=self.order(total=36900)
+        root=tk.Tk();root.withdraw()
+        try:
+            with patch.dict(os.environ,{'REQM_SELF_TEST':'1'}):app=Desktop(root,self.s)
+            panel=app.voucher_panel;panel.start.set(DAY);panel.end.set(DAY);panel.refresh()
+            panel.tree.selection_set(panel.tree.get_children()[0]);panel.edit()
+            win=next(w for w in root.winfo_children() if isinstance(w,tk.Toplevel))
+            frame=win.winfo_children()[0]
+            entries=[w for w in frame.winfo_children() if isinstance(w,ttk.Entry)]
+            button=next(w for w in frame.winfo_children() if isinstance(w,ttk.Button) and w.cget('text')=='금액 확정')
+            def set_entry(widget,value):root.setvar(widget.cget('textvariable'),value)
+            def texts():
+                return [root.getvar(w.cget('textvariable')) for w in frame.winfo_children() if isinstance(w,ttk.Label) and w.cget('textvariable')]
+            set_entry(entries[1],'28,500');set_entry(entries[2],'')
+            self.assertTrue(any('남은 금액 8,400원' in text for text in texts()))
+            self.assertTrue(button.instate(['disabled']))
+            set_entry(entries[2],'8,400')
+            self.assertTrue(any('금액 일치' in text for text in texts()))
+            self.assertTrue(button.instate(['!disabled']))
+            set_entry(entries[2],'8,500')
+            self.assertTrue(any('초과 금액 100원' in text for text in texts()))
+            self.assertTrue(button.instate(['disabled']))
+            set_entry(entries[2],'8,400');set_entry(entries[0],'37,900');set_entry(entries[2],'9,400')
+            self.assertTrue(button.instate(['disabled']))
+            set_entry(entries[3],'원본 가격 정정 확인')
+            self.assertTrue(button.instate(['!disabled']))
+            button.invoke()
+            updated=next(r for r in self.s.voucher_rows(DAY,DAY) if r['id']==a['id'])
+            self.assertEqual(updated['total'],Decimal(37900))
+            self.assertFalse(self.s.voucher_review_pending(updated))
+        finally:
+            for timer in root.tk.call('after','info'):root.after_cancel(timer)
+            root.destroy()
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.folder=Path(self.temp.name)
         self.s=Operations(self.folder/'data', REFERENCE)
@@ -55,7 +146,7 @@ class VoucherTests(unittest.TestCase):
     def test_conflicting_history_requires_manual_allocation(self):
         a=self.order();b=self.order('B',True);c=self.order('C',True)
         self.s.set_voucher_amounts(a['id'],34900,[28000,6900])
-        self.s.set_voucher_amounts(b['id'],34900,[29000,5900])
+        self.s.set_voucher_amounts(b['id'],34900,[29000,5900],review_reason='배분 기준 변경 확인')
         self.assertIsNone(self.s.voucher_suggestion(c))
         self.assertEqual(self.s.reuse_voucher_amounts(DAY,DAY),0)
 
@@ -64,7 +155,10 @@ class VoucherTests(unittest.TestCase):
         for total,amounts in ((34900,[28000,6000]),(34900,[-1,34901])):
             with self.assertRaises(ValueError):self.s.set_voucher_amounts(a['id'],total,amounts)
             self.assertEqual(workspace_digest(export_workspace(self.s)),before)
-        self.s.set_voucher_amounts(a['id'],40000,[30000,10000])
+        with self.assertRaisesRegex(ValueError,'원본 금액 불일치'):
+            self.s.set_voucher_amounts(a['id'],40000,[30000,10000])
+        self.assertEqual(workspace_digest(export_workspace(self.s)),before)
+        self.s.set_voucher_amounts(a['id'],40000,[30000,10000],review_reason='원본 가격 정정 확인')
         updated=self.s.voucher_rows(DAY,DAY)[0]
         self.assertEqual(updated['total'],Decimal(40000))
 

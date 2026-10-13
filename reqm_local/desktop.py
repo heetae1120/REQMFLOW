@@ -35,7 +35,7 @@ from .shipping import compact
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.41'
+APP_VERSION = '1.9.42'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -81,13 +81,14 @@ def matching_header_row_number(value) -> int:
 
 def amount_split_totals(total, values):
     """Return the order total, entered sum, and live difference for split amounts."""
+    from .voucher import won
     try:
-        expected=Decimal(str(total or '0').replace(',','').strip() or '0')
+        expected=won(str(total or '0').strip() or '0')
         entered=sum(
-            (Decimal(str(value or '').replace(',','').strip() or '0') for value in values),
+            (won(str(value or '').strip() or '0') for value in values),
             Decimal('0'),
         )
-    except InvalidOperation:
+    except ValueError:
         return None
     return expected,entered,entered-expected
 
@@ -2109,11 +2110,11 @@ class Desktop:
                 difference_label.configure(foreground='#BE123C')
                 save_button.state(['disabled'])
             elif difference < 0:
-                difference_text.set(f'전체금액 대비 -{abs(int(difference)):,}원 부족')
-                difference_label.configure(foreground='#BE123C')
+                difference_text.set(f'남은 금액 {abs(int(difference)):,}원')
+                difference_label.configure(foreground='#B45309')
                 save_button.state(['disabled'])
             else:
-                difference_text.set('전체금액과 일치합니다.')
+                difference_text.set('금액 일치 · 전체금액과 일치합니다.')
                 difference_label.configure(foreground='#15803D')
                 save_button.state(['!disabled'])
         for variable in amounts.values():

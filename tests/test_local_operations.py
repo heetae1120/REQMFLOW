@@ -428,6 +428,8 @@ class LocalTests(unittest.TestCase):
         first_line=self.request(first);self.result(first_line,3,'DAY-1','2026-10-01')
         _,second=self.import_order(line='D2',amount=2000,fee=0,bundle='D2')
         second_line=self.request(second);self.result(second_line,3,'DAY-2','2026-10-02')
+        voucher=self.s.voucher_rows('2026-10-02','2026-10-02')[0]
+        self.s.set_voucher_amounts(voucher['id'],2000,[2000],review_reason='판매가격 변경 확인')
         target=self.folder/'range.xlsx'
         batch=self.s.export_erp(
             '2026-10-06','2026-10-02',target,from_day='2026-10-02',include_esm=False,
@@ -449,6 +451,10 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(len(pending),1)
         self.assertEqual(pending[0]['amount'],'10000')
         self.s.set_erp_amount(pending[0]['id'],'12345')
+        with self.assertRaisesRegex(ValueError,'원본 금액 불일치'):
+            self.s.export_erp('2026-10-05','2026-10-05',None,preview=True)
+        voucher=self.s.voucher_rows('2026-10-05','2026-10-05')[0]
+        self.s.set_voucher_amounts(voucher['id'],12345,[12345],review_reason='수정 금액 검수 완료')
         path=self.folder/'rematched.xlsx'
         self.s.export_erp('2026-10-05','2026-10-05',path)
         book=load_workbook(path,data_only=True)

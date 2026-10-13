@@ -35,6 +35,7 @@ class VoucherPanel:
         ttk.Label(parent, text='출고 확정 후 사용하세요. 구성품 금액은 단가가 아닌 해당 출고수량의 총금액입니다. 주문 상세는 행을 더블클릭하세요.').pack(anchor='w')
         self.tree = app.tree(parent, ['출고일', '판매처', '품목코드', '품목명', '수량', '상품금액', '상태'], [100, 130, 190, 300, 65, 110, 160])
         self.tree.bind('<Double-1>', lambda _: app.safe(self.edit))
+        self.tree.tag_configure('warning', foreground='#B45309')
         ttk.Label(parent, textvariable=self.status).pack(anchor='w', pady=6)
         self.rows = {}
 
@@ -42,23 +43,29 @@ class VoucherPanel:
         self.tree.delete(*self.tree.get_children()); self.rows = {}
         groups = self.service.voucher_rows(self.start.get(), self.end.get(),self.show_exported.get(),include_requests=True)
         terms = self.search.get().casefold().split()
+        history = self.service.voucher_review_history(self.service.voucher_rows('0001-01-01', self.end.get(), True))
+        review_count = 0
         for group in groups:
             text = str([group['channel'], group['data'].get('order_no'), group['data'].get('recipient'), group['components']]).casefold()
             if any(term not in text for term in terms):
                 continue
             suggestion = self.service.voucher_suggestion(group) if not group['confirmed'] else None
             state = '이미 ERP 생성' if group['exported'] else group['issue'] or ('금액 확정' if group['confirmed'] else '기존 기준 적용 가능' if suggestion else '금액 확인 필요')
+            warnings = self.service.voucher_review_pending(group, history) if group['components'] and not group['exported'] and not group['issue'] else []
+            if warnings:
+                state = ' / '.join(warnings)
+                review_count += 1
             for component in group['components'] or [{}]:
                 key = str(len(self.rows)); self.rows[key] = group
                 code = component.get('code', '')
                 self.tree.insert('', 'end', iid=key, values=[group['day'], group['channel'], code,
                     self.service.item_name(code, component.get('name', '')) if code else group['data'].get('product',''),
-                    component.get('quantity',group['data'].get('quantity','')), component.get('amount',group['data'].get('amount','')), state])
+                    component.get('quantity',group['data'].get('quantity','')), component.get('amount',group['data'].get('amount','')), state], tags=('warning',) if warnings else ())
         total = sum((g['total'] for g in groups), Decimal(0))
         pending = sum((not g['confirmed'] or bool(g['issue'])) and not g['exported'] for g in groups)
         exported=sum(g['exported'] for g in groups)
         requests=sum(g['kind']=='request' for g in groups)
-        self.status.set(f'조회 주문 {len(groups)}건 · 출고 확인 전 {requests}건 · 이미 생성 {exported}건 · 금액/매칭 확인 필요 {pending}건 · 표의 금액 {total:,.0f}원')
+        self.status.set(f'조회 주문 {len(groups)}건 · 출고 확인 전 {requests}건 · 이미 생성 {exported}건 · 금액/매칭 확인 필요 {pending}건 · 금액 차이 확인 {review_count}건 · 표의 금액 {total:,.0f}원')
 
     def confirm_requests(self):
         from tkinter.simpledialog import askstring
@@ -113,23 +120,40 @@ class VoucherPanel:
         if len(values) == 1:
             total.trace_add('write', lambda *_: values[0].set(total.get()))
             values[0].set(total.get())
-        difference = tk.StringVar(); ttk.Label(frame, textvariable=difference).pack(anchor='w', pady=8)
+        difference = tk.StringVar()
+        difference_label = ttk.Label(frame, textvariable=difference, font=('', 11, 'bold'))
+        difference_label.pack(anchor='w', pady=8)
+        review_text = tk.StringVar()
+        ttk.Label(frame, textvariable=review_text, foreground='#B45309', wraplength=700).pack(anchor='w')
+        review_reason = tk.StringVar()
+        ttk.Label(frame, text='차이 확인 사유 (할인·행사·금액 수정 등)').pack(anchor='w', pady=(8,2))
+        ttk.Entry(frame, textvariable=review_reason, width=60).pack(anchor='w')
         remember = tk.BooleanVar(value=True)
         ttk.Checkbutton(frame, text='같은 판매처·구성·금액의 다른 색상 세트에도 배분 기준 저장', variable=remember).pack(anchor='w')
+        history = self.service.voucher_review_history(self.service.voucher_rows('0001-01-01',group['day'],True))
         def update(*_):
             try:
-                from .voucher import won
-                diff = won(total.get()) - sum((won(v.get()) for v in values), Decimal(0))
-                difference.set(f'상품 총금액과 차이 {diff:,.0f}원')
+                from .voucher import allocation_feedback, won
+                text, color, balanced = allocation_feedback(total.get(), [v.get() for v in values])
+                difference.set(f'목표 총금액 {won(total.get()):,.0f}원 · '+text)
+                difference_label.configure(foreground=color)
+                valid = all(v.get().strip() for v in values)
+                warnings = self.service.voucher_review(group,total.get(),[v.get() for v in values],history) if balanced and valid else []
+                review_text.set('\n'.join(warnings))
+                save_button.state(['!disabled'] if balanced and valid and (not warnings or review_reason.get().strip()) else ['disabled'])
             except ValueError:
                 difference.set('금액에는 0 이상의 정수를 입력하세요.')
-        for variable in [total, *values]: variable.trace_add('write', update)
-        update()
+                difference_label.configure(foreground='#BE123C')
+                review_text.set('')
+                save_button.state(['disabled'])
         def save():
-            self.service.set_voucher_amounts(group['id'], total.get(), [v.get() for v in values], remember.get())
+            self.service.set_voucher_amounts(group['id'], total.get(), [v.get() for v in values], remember.get(), review_reason.get())
             if remember.get(): self.service.reuse_voucher_amounts(self.start.get(), self.end.get())
             win.destroy(); self.app.refresh()
-        self.app.button(frame, '금액 확정', save, style='Accent.TButton')
+        save_button = ttk.Button(frame, text='금액 확정', command=lambda:self.app.safe(save), style='Accent.TButton')
+        save_button.pack(anchor='w', pady=4)
+        for variable in [total, *values, review_reason]: variable.trace_add('write', update)
+        update()
         self.app.button(frame, '닫기', win.destroy)
 
     def fees(self):

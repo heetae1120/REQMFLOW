@@ -2151,6 +2151,16 @@ class Operations(TrackingOperations, VoucherOperations):
                 esm_unmatched.append(row)
         if esm_unmatched:
             raise ValueError(f'상품 매칭이 필요한 옥션/지마켓 ERP 주문이 {len(esm_unmatched):,}건 있습니다.')
+        selected_ids = {'shipment:'+s['order_id']+':'+s['day'] for s in pending}
+        selected_ids.update('smartstore:'+r['id'] for r in smart_rows)
+        selected_ids.update('esm:'+r['id'] for r in esm_rows)
+        review_history = self.voucher_rows('0001-01-01', through, True)
+        review_groups = self.voucher_review_history(review_history)
+        for voucher in review_history:
+            if voucher['id'] in selected_ids:
+                warnings = self.voucher_review_pending(voucher, review_groups)
+                if warnings:
+                    raise ValueError(f"주문 {voucher['data'].get('order_no','')}: {' / '.join(warnings)}. 전표 작업표에서 확인 사유를 입력하고 금액을 확정하세요.")
         rows = []
         def append(c, q, amount):
             from .voucher import won
