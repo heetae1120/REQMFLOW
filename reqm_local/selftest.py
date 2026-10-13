@@ -5,21 +5,15 @@ import sys
 from pathlib import Path
 import tkinter as tk
 from .files import reference_data_path, workbook_bytes
-from .cloud import load_cloud_config
 from .service import Operations
 from .desktop import Desktop, APP_VERSION
 
 
 def run(folder):
-    from supabase import create_client
     from selenium.webdriver.edge.options import Options as EdgeOptions
     import pystray
-    assert callable(create_client)
     assert EdgeOptions
     assert pystray.Icon
-    cloud_config=load_cloud_config()
-    assert cloud_config.get('supabase_url') == 'https://jcslohuraqclhryeqxoc.supabase.co'
-    assert str(cloud_config.get('supabase_publishable_key','')).startswith('sb_publishable_')
     folder=Path(folder);folder.mkdir(parents=True,exist_ok=True)
     base=Path(getattr(sys,'_MEIPASS',Path(__file__).resolve().parent.parent))
     service=Operations(folder/'test-data',reference_data_path(base))
@@ -36,6 +30,8 @@ def run(folder):
         service.export_erp('2026-10-01','2026-10-01',folder/'demo-erp.xlsx')
         root=tk.Tk();root.withdraw();app=Desktop(root,service);root.update_idletasks()
         assert root.title().startswith('REQM FLOW')
+        assert app.cloud_status.get() == '로컬 DB 저장'
+        assert (service.folder/'backups'/'supabase-to-local.sqlite3').exists()
         from .closed_malls import MALLS
         assert len(app.closed_mall_panel.table.get_children()) == len(MALLS)
         assert set(app.closed_mall_panel.table.selection()) == {'musinsa', '29cm'}
@@ -53,7 +49,7 @@ def run(folder):
             '구분','출고일','판매처','주문번호','이름','ERP 품목코드','ERP 품목명','출하창고','수량','송장번호',
         )
         assert tuple(app.erp_shipments['columns']) == (
-            '실제 출고일','판매처','주문번호','이름','구성품 수','주문 금액','현재 구성품별 금액',
+            '실제 출고일','판매처','주문번호','이름','구성품 수','주문 금액','상품명','상품옵션','현재 구성품별 금액',
         )
         assert tuple(app.table['columns']) == (
             '판매처','주문번호','이름','주소','연락처','상품명','매칭품목','출하창고','진행상태','작업구분',
@@ -89,7 +85,7 @@ def run(folder):
         assert len(app.tracking_panel.job_tree.get_children())==1
         assert len(app.tracking_panel.row_tree.get_children())==1
         (folder/'self-test.json').write_text(json.dumps({'ok':True,'version':APP_VERSION,'orders':1,'artifacts':2,
-            'desktop':'OK','font':app.font_family,'cloud_config':'OK','tracking':'OK','workspace_roundtrip':'OK'},ensure_ascii=False),encoding='utf-8')
+            'desktop':'OK','font':app.font_family,'storage':'LOCAL','tracking':'OK','workspace_roundtrip':'OK'},ensure_ascii=False),encoding='utf-8')
     except Exception as exc:
         (folder/'self-test.json').write_text(json.dumps({'ok':False,'error':str(exc)},ensure_ascii=False),encoding='utf-8')
         raise

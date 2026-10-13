@@ -21,7 +21,7 @@ a = Analysis(
     datas=datas,
     hiddenimports=['xlrd','msoffcrypto','olefile','cryptography','tkinterdnd2','pystray._win32','supabase','reqm_local.updater',*selenium_hiddenimports],
     binaries=[],
-    excludes=['PySide6','numpy','pandas','matplotlib','scipy','IPython','pytest'],
+    excludes=['PySide6','numpy','pandas','matplotlib','scipy','IPython','pytest','_pytest','pygments','pluggy','iniconfig'],
 )
 pyz = PYZ(a.pure)
 exe = EXE(

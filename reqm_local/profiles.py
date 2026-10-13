@@ -44,12 +44,12 @@ PROFILE_PRESETS = [
     profile(SMARTSTORE_ERP_MAPPING,['스마트스토어_ERP','스마트스토어 ERP'],{
         'order_no':['주문번호'],'line_no':['상품주문번호'],'product':['상품명'],'option':['옵션정보','옵션'],
         'quantity':['수량'],'amount':['최종 상품별 총 주문금액','결제금액','금액'],
-        'paid_at':['결제일','주문일자'],
+        'paid_at':['결제일'],
     },required=[],password='1234',enabled=False,purpose='smartstore_erp'),
     profile(SMARTSTORE_PURCHASE_MAPPING,['스마트스토어_구매확정','구매확정내역','구매확정'],{
         'order_no':['주문번호'],'line_no':['상품주문번호'],'product':['상품명'],'option':['옵션정보','옵션'],
         'quantity':['수량'],'amount':['구매확정금액','정산예정금액','최종 상품별 총 주문금액','결제금액','금액'],
-        'paid_at':['구매확정일','구매확정일시','결제일','주문일자'],
+        'paid_at':['결제일'],
     },required=[],password='1234',enabled=False,purpose='smartstore_purchase_erp',
             channel=SMARTSTORE_PURCHASE_CHANNEL),
     profile('지그재그',['order_item_list-PRE_SHIPMENT','지그재그'],{
@@ -214,6 +214,10 @@ def merge_profile_presets(settings):
             existing['amount_is_unit'] = preset.get('amount_is_unit', False)
             existing['sum_columns'] = preset.get('sum_columns', {})
             existing['purpose'] = preset.get('purpose', 'order')
+            if preset.get('purpose') in ('smartstore_erp','smartstore_purchase_erp'):
+                # Both SmartStore ERP sources are dated exclusively by the original payment date.
+                existing.setdefault('columns',{})['paid_at']=['결제일']
+                existing.setdefault('column_indexes',{}).pop('paid_at',None)
             continue
         if existing:
             existing.clear(); existing.update(preset)

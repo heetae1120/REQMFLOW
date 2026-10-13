@@ -22,22 +22,20 @@ from .files import (
     reference_data_path, sample_header_names, settings_at, workbook_bytes, wekeep_workbook_bytes,
 )
 from .service import Operations
-from .cloud import login_and_load, load_catalog
 from .ui_helpers import (
     autosize_tree, bind_desktop_drag, bind_tree_sorting, bind_wide_combobox, filter_combobox_choices,
     post_combobox, search_suggestions,
 )
-from .workspace_cloud import CloudWorkspace, WorkspaceConflict, WorkspaceFormatError
 from .profiles import (
     PROFILE_PRESETS, SALES_CHANNELS, MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING,
     SMARTSTORE_PURCHASE_MAPPING, SMARTSTORE_PURCHASE_CHANNEL,
 )
 from .column_matching import match_columns
-from .shipping import compact, channel_key
+from .shipping import compact
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.22'
+APP_VERSION = '1.9.30'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -110,9 +108,6 @@ def register_brand_font():
 class Desktop:
     def __init__(self, root, service):
         self.root, self.service = root, service
-        self.cloud_client = None
-        self.cloud_workspace = None
-        self.cloud_polling = False
         self.tray_icon = None
         self._quitting = False
         self._source_stamp = self.source_stamp()
@@ -193,11 +188,11 @@ class Desktop:
         tk.Label(title_box,text='주문 출고 워크스페이스',fg='#172033',bg='#F6F8FC',font=(f,21,'bold')).pack(anchor='w')
         tk.Label(title_box,text='주문 확인부터 실제 출고와 ERP 반영까지',fg='#64748B',bg='#F6F8FC',font=(f,9)).pack(anchor='w',pady=(2,0))
         badge_box = tk.Frame(top,bg='#F6F8FC');badge_box.pack(side='right',anchor='n')
-        self.cloud_status = tk.StringVar(value='API 로그인')
-        tk.Button(
-            badge_box,textvariable=self.cloud_status,command=self.open_cloud_login,
+        self.cloud_status = tk.StringVar(value='로컬 DB 저장')
+        tk.Label(
+            badge_box,textvariable=self.cloud_status,
             fg='#166534',bg='#DCFCE7',activebackground='#BBF7D0',relief='flat',borderwidth=0,
-            font=(f,9,'bold'),padx=11,pady=6,cursor='hand2',
+            font=(f,9,'bold'),padx=11,pady=6,
         ).pack(side='left')
         self.update_text = tk.StringVar(value=f'업데이트 · {APP_VERSION}')
         tk.Button(
@@ -350,7 +345,11 @@ class Desktop:
         amount_frame = ttk.Frame(result_tabs,padding=20)
         esm_frame = ttk.Frame(result_tabs,padding=20)
         erp_frame = ttk.Frame(result_tabs,padding=20)
+        self.erp_ship_from = tk.StringVar(value=date.today().isoformat())
+        self.erp_ship_through = tk.StringVar(value=date.today().isoformat())
         self.erp_ship_day = tk.StringVar(value=date.today().isoformat())
+        self.erp_amount_from = tk.StringVar(value=date.today().isoformat())
+        self.erp_amount_through = tk.StringVar(value=date.today().isoformat())
         result_tabs.add(result_input,text='1  출고건 확인')
         result_tabs.add(amount_frame,text='2  금액 매칭 및 세트 분리')
         result_tabs.add(esm_frame,text='2-1  옥션/지마켓 ERP전환')
@@ -361,6 +360,12 @@ class Desktop:
         self.tracking_panel = TrackingPanel(self,tracking_frame)
         ttk.Label(result_input,text='당일 출고건 확인',font=(self.font_family,18,'bold')).pack(anchor='w')
         ttk.Label(result_input,text='선택한 날짜의 출고건을 불러온 뒤, 이번 ERP Excel에 적용할 창고와 품목만 변경할 수 있습니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
+        confirmed_line=ttk.Frame(result_input);confirmed_line.pack(fill='x',pady=(0,10))
+        ttk.Label(confirmed_line,text='조회 기간').pack(side='left')
+        self.date_picker(confirmed_line,self.erp_ship_from,'실제 출고 조회 시작일').pack(side='left',padx=6)
+        ttk.Label(confirmed_line,text='~').pack(side='left')
+        self.date_picker(confirmed_line,self.erp_ship_through,'실제 출고 조회 종료일').pack(side='left',padx=6)
+        self.button(confirmed_line,'기간 조회',self.refresh_actual_erp_day,style='Accent.TButton')
         result_card = ttk.LabelFrame(result_input,text='입력 파일',padding=18)
         result_card.pack(fill='x')
         ttk.Label(result_card,text='일반 판매처는 출고요청 기준으로 불러오며, 스마트스토어는 전용 파일을 입력합니다.',foreground='#64748B').pack(anchor='w',pady=(0,12))
@@ -370,21 +375,27 @@ class Desktop:
         self.button(result_actions,'품목 변경',self.change_shipment_item,style='Quiet.TButton')
         self.button(result_actions,'스마트스토어 출고파일',self.smartstore_erp_results,style='Accent.TButton')
         self.button(result_actions,'구매확정파일 입력',self.smartstore_purchase_results,style='Accent.TButton')
-        confirmed_line=ttk.Frame(result_input);confirmed_line.pack(fill='x',pady=(12,8))
-        ttk.Label(confirmed_line,text='출고일').pack(side='left')
-        self.date_picker(confirmed_line,self.erp_ship_day,'실제 출고일 선택').pack(side='left',padx=6)
+        self.button(result_actions,'선택 주문 삭제',self.delete_confirmed_shipments,style='Danger.TButton')
         self.confirmed_shipments = self.tree(result_input,['구분','출고일','판매처','주문번호','이름','ERP 품목코드','ERP 품목명','출하창고','수량','송장번호'],[125,105,130,150,100,155,240,95,65,140])
         ttk.Label(amount_frame,text='금액 매칭 및 세트 분리',font=(self.font_family,18,'bold')).pack(anchor='w')
-        ttk.Label(amount_frame,text='주문·출고요청에서 구성품을 2개 이상 매칭한 주문 중 금액 분리가 필요한 건만 표시합니다.',foreground='#64748B').pack(anchor='w',pady=(4,16))
+        ttk.Label(amount_frame,text='일반 출고의 금액 분리 대상과 스마트스토어 미매칭·세트 주문을 함께 표시합니다.',foreground='#64748B').pack(anchor='w',pady=(4,16))
         amount_line = ttk.Frame(amount_frame); amount_line.pack(fill='x',pady=(0,10))
-        ttk.Label(amount_line,text='실제 출고일').pack(side='left')
-        self.date_picker(amount_line,self.erp_ship_day,'실제 출고일 선택').pack(side='left',padx=6)
-        self.button(amount_line,'선택 주문 금액 나누기',self.split_order_amount,style='Accent.TButton')
-        self.erp_shipments = self.tree(amount_frame,['실제 출고일','판매처','주문번호','이름','구성품 수','주문 금액','현재 구성품별 금액'],[110,120,160,110,85,120,560])
-        self.erp_shipments.bind('<Double-1>',lambda _event:self.safe(self.split_order_amount))
-        self.erp_ship_day.trace_add('write',lambda *_:self.refresh_actual_erp_day())
+        ttk.Label(amount_line,text='조회 기간').pack(side='left')
+        self.date_picker(amount_line,self.erp_amount_from,'금액 매칭 조회 시작일').pack(side='left',padx=6)
+        ttk.Label(amount_line,text='~').pack(side='left')
+        self.date_picker(amount_line,self.erp_amount_through,'금액 매칭 조회 종료일').pack(side='left',padx=6)
+        self.button(amount_line,'기간 조회',self.refresh_erp_shipments,style='Accent.TButton')
+        self.button(amount_line,'스마트스토어 상품·세트 매칭',self.edit_erp_set,style='Quiet.TButton')
+        self.button(amount_line,'선택 일반출고 금액 수정',self.split_order_amount,style='Accent.TButton')
+        self.erp_shipments = self.tree(amount_frame,['실제 출고일','판매처','주문번호','이름','구성품 수','주문 금액','상품명','상품옵션','현재 구성품별 금액'],[110,120,160,110,85,120,260,220,520])
+        self.erp_shipments.bind('<Double-1>',lambda _event:self.safe(self.open_amount_split_action))
+        self.erp_ship_from.trace_add('write',lambda *_:self.refresh_confirmed_shipments())
+        self.erp_ship_through.trace_add('write',lambda *_:self.refresh_confirmed_shipments())
         self.esm_start_day = tk.StringVar(value=date.today().isoformat())
         self.esm_end_day = tk.StringVar(value=date.today().isoformat())
+        self.esm_view_from = tk.StringVar(value=date.today().isoformat())
+        self.esm_view_through = tk.StringVar(value=date.today().isoformat())
+        self.esm_show_all = False
         self.esm_user_id = tk.StringVar()
         self.esm_password = tk.StringVar()
         self.esm_progress = tk.StringVar(value='조회 기간과 로그인 정보를 확인한 뒤 자동 다운로드를 실행하세요.')
@@ -407,7 +418,14 @@ class Desktop:
         ttk.Label(esm_card,textvariable=self.esm_progress,foreground='#2563EB').pack(anchor='w',padx=8,pady=(10,0))
         esm_actions=ttk.Frame(esm_frame);esm_actions.pack(fill='x',pady=(12,8))
         ttk.Label(esm_actions,text='변환 내역',font=(self.font_family,11,'bold')).pack(side='left')
+        ttk.Label(esm_actions,text='조회 기간').pack(side='left',padx=(14,4))
+        self.date_picker(esm_actions,self.esm_view_from,'ESM 조회 시작일').pack(side='left')
+        ttk.Label(esm_actions,text='~').pack(side='left',padx=3)
+        self.date_picker(esm_actions,self.esm_view_through,'ESM 조회 종료일').pack(side='left')
+        self.button(esm_actions,'기간 조회',self.show_esm_day,style='Accent.TButton')
+        self.button(esm_actions,'전체 내역',self.show_all_esm,style='Quiet.TButton')
         self.button(esm_actions,'선택 상품 매칭',self.edit_esm_set,style='Accent.TButton')
+        self.button(esm_actions,'선택 주문 삭제',self.delete_esm_entries,style='Danger.TButton')
         self.button(esm_actions,'목록 새로고침',self.refresh_esm_entries,style='Quiet.TButton')
         self.esm_entries=self.tree(esm_frame,['기준일','판매처','주문번호','상품명','옵션','수량','단가','합계','ERP 품목','상태'],[105,90,145,280,220,65,95,105,170,180])
         self.esm_entries.bind('<Double-1>',lambda _event:self.safe(self.edit_esm_set))
@@ -453,9 +471,9 @@ class Desktop:
             [120,105,120,130,160,100,125,260,190,260,65,100,150,90,220,90,190],
         )
         self.history.bind('<Double-1>',lambda _event:self.safe(self.edit_history_note))
-        ttk.Label(settings_frame,text='로그인 전에는 이 PC에 저장되고, API 로그인 후에는 공유 DB와 동기화됩니다.',font=(self.font_family,16,'bold')).pack(anchor='w',pady=10)
+        ttk.Label(settings_frame,text='모든 주문·매칭·출고·ERP 자료는 이 PC에만 저장됩니다.',font=(self.font_family,16,'bold')).pack(anchor='w',pady=10)
         ttk.Label(settings_frame,text=str(service.folder),wraplength=1100).pack(anchor='w')
-        ttk.Label(settings_frame,text='설정 파일에서 판매처별 헤더·계정·파일명 단서와 출력 열 이름을 변경할 수 있습니다.\n주문에 포함된 배송비는 원본의 배송비 합계를 사용합니다. 실제 거래처 규칙을 확인하세요.\nAPI 로그인 후 주문·매칭·출고·ERP 이력은 Supabase 공유 작업공간으로 동기화됩니다.\n동시에 같은 자료를 수정하면 버전 충돌로 저장을 중단하고 최신 자료를 다시 불러옵니다.',wraplength=1100).pack(anchor='w',pady=16)
+        ttk.Label(settings_frame,text='설정 파일에서 판매처별 헤더·계정·파일명 단서와 출력 열 이름을 변경할 수 있습니다.\n주문에 포함된 배송비는 원본의 배송비 합계를 사용합니다. 실제 거래처 규칙을 확인하세요.\nDB는 operations.sqlite3에 저장되며 Supabase 사용량이나 인터넷 연결에 영향을 받지 않습니다.\n전환 전 로컬 캐시는 backups\\supabase-to-local.sqlite3에 한 번 자동 백업됩니다.',wraplength=1100).pack(anchor='w',pady=16)
         line = ttk.Frame(settings_frame); line.pack(anchor='w')
         self.button(line,'설정 파일 열기',lambda:os.startfile(service.folder/'settings.json'))
         self.button(line,'설정 다시 읽기',self.reload_settings)
@@ -469,12 +487,11 @@ class Desktop:
         self.button(item_actions,'선택 품목 수정',self.edit_selected_item_name,style='Quiet.TButton')
         self.item_name_tree=self.tree(item_box,['ERP 품목코드','매칭품목명'],[300,520])
         self.item_name_tree.bind('<Double-1>',lambda _event:self.safe(self.edit_selected_item_name))
-        tk.Label(content,text='LOCAL CACHE + SUPABASE LIVE WORKSPACE   ·   날짜 YYYY-MM-DD   ·   REQM FLOW',bg='#F4F7FB',fg='#94A3B8',font=(self.font_family,8,'bold'),pady=6).pack(fill='x')
+        tk.Label(content,text='LOCAL DATABASE   ·   날짜 YYYY-MM-DD   ·   REQM FLOW',bg='#F4F7FB',fg='#94A3B8',font=(self.font_family,8,'bold'),pady=6).pack(fill='x')
         self.refresh()
         self.root.protocol('WM_DELETE_WINDOW',self.hide_to_tray)
         self.root.bind('<Destroy>',self.on_root_destroy,add='+')
         self.setup_tray()
-        self.root.after(350,self.auto_cloud_login)
         self.root.after(4000,self.check_for_source_update)
         if getattr(sys,'frozen',False):
             self.root.after(1800,self.check_remote_update)
@@ -718,141 +735,6 @@ class Desktop:
             except Exception:pass
             self.tray_icon = None
 
-    def open_cloud_login(self):
-        if self.cloud_client is not None:
-            if messagebox.askyesno('API 새로고침','로그인 세션으로 최신 품목·매칭 정보를 다시 불러올까요?',parent=self.root):
-                self.cloud_status.set('API 불러오는 중…')
-                threading.Thread(target=self._refresh_cloud_worker,daemon=True).start()
-            return
-        win=tk.Toplevel(self.root);win.title('Supabase API 로그인');win.transient(self.root);win.grab_set();win.resizable(False,False)
-        frame=ttk.Frame(win,padding=18);frame.pack(fill='both',expand=True)
-        ttk.Label(frame,text='Supabase Auth 사용자',font=(self.font_family,14,'bold')).grid(row=0,column=0,columnspan=2,sticky='w',pady=(0,12))
-        ttk.Label(
-            frame,
-            text='Supabase 대시보드 팀원 계정이 아닙니다.\n이 프로젝트의 Authentication > Users에 등록된 계정을 입력하세요.',
-            foreground='#64748B',
-        ).grid(row=1,column=0,columnspan=2,sticky='w',pady=(0,12))
-        saved_email,saved_password=load_credentials(self.service.folder/'supabase_credentials.dat')
-        email=tk.StringVar(value=saved_email or self.service.settings.get('cloud_email',''))
-        password=tk.StringVar(value=saved_password)
-        ttk.Label(frame,text='이메일').grid(row=2,column=0,sticky='w',padx=(0,10),pady=5)
-        email_entry=ttk.Entry(frame,textvariable=email,width=38);email_entry.grid(row=2,column=1,sticky='ew',pady=5)
-        ttk.Label(frame,text='비밀번호').grid(row=3,column=0,sticky='w',padx=(0,10),pady=5)
-        password_entry=ttk.Entry(frame,textvariable=password,show='•',width=38);password_entry.grid(row=3,column=1,sticky='ew',pady=5)
-        status=tk.StringVar(value='로그인하면 품목과 주문·출고·ERP 공유 작업공간을 연결합니다.')
-        ttk.Label(frame,textvariable=status,foreground='#2563EB').grid(row=4,column=0,columnspan=2,sticky='w',pady=(8,4))
-        actions=ttk.Frame(frame);actions.grid(row=5,column=0,columnspan=2,sticky='e',pady=(10,0))
-        ttk.Button(actions,text='취소',command=win.destroy).pack(side='left',padx=4)
-        login_button=ttk.Button(actions,text='로그인',style='Accent.TButton')
-        login_button.pack(side='left',padx=4)
-        def start(*_):
-            user=email.get().strip();secret=password.get()
-            if not user or not secret:
-                status.set('이메일과 비밀번호를 입력하세요.');return
-            login_button.configure(state='disabled');status.set('로그인 및 DB 불러오는 중…');self.cloud_status.set('API 연결 중…')
-            threading.Thread(target=self._cloud_login_worker,args=(win,user,secret,status,login_button,True),daemon=True).start()
-        login_button.configure(command=start);password_entry.bind('<Return>',start)
-        (email_entry if not email.get() else password_entry).focus_set()
-
-    def auto_cloud_login(self):
-        if self.cloud_client is not None or self._quitting:
-            return
-        email,password=load_credentials(self.service.folder/'supabase_credentials.dat')
-        if not email or not password:
-            return
-        self.cloud_status.set('API 자동 로그인 중…')
-        threading.Thread(
-            target=self._cloud_login_worker,
-            args=(None,email,password,None,None,False),daemon=True,
-        ).start()
-
-    def _cloud_login_worker(self,win,email,password,status,login_button,show_notice=True):
-        try:
-            client,catalog,counts=login_and_load(email,password,self.service.reference_dir)
-            self.root.after(0,lambda:self._cloud_login_success(win,email,password,client,catalog,counts,show_notice))
-        except Exception as exc:
-            detail=str(exc)
-            self.root.after(0,lambda:self._cloud_login_failed(status,login_button,detail))
-
-    def _cloud_login_success(self,win,email,password,client,catalog,counts,show_notice=True):
-        self.cloud_client=client;self.service.catalog=catalog
-        save_credentials(
-            self.service.folder/'supabase_credentials.dat',email,password,account_name='Supabase API'
-        )
-        self.service.settings['cloud_email']=email
-        path=self.service.folder/'settings.json';temporary=path.with_suffix('.json.tmp')
-        temporary.write_text(json.dumps(self.service.settings,ensure_ascii=False,indent=2),encoding='utf-8');os.replace(temporary,path)
-        try:
-            workspace=CloudWorkspace(client,self.service)
-            direction=workspace.bootstrap()
-            self.service.refresh_matches()
-            workspace.push_if_changed()
-        except Exception as exc:
-            self.cloud_client=None;self.cloud_workspace=None;self.cloud_status.set('API 로그인')
-            if win is not None and win.winfo_exists():win.destroy()
-            messagebox.showerror(
-                '공유 DB 연결 실패',
-                str(exc) if isinstance(exc, WorkspaceFormatError) else f'{exc}\n\n공유 DB 설정과 계정 권한, 네트워크 연결을 확인하세요.',
-                parent=self.root,
-            )
-            return
-        self.cloud_workspace=workspace
-        self.cloud_status.set(f'공유 DB 연결됨 · v{workspace.version}')
-        if win is not None and win.winfo_exists():win.destroy()
-        self.refresh()
-        self.load_matching_profile()
-        self.root.after(5000,self.poll_cloud_workspace)
-        total=counts.get('ecount_item_reference',0)
-        action='기존 공유 자료를 이 PC에 적용했습니다.' if direction=='downloaded' else '이 PC의 기존 자료를 첫 공유 자료로 올렸습니다.'
-        if show_notice:
-            messagebox.showinfo('공유 DB 연결 완료',f'{action}\n전표 품목 {total:,}개 · 출고 별칭 {counts.get("item_aliases",0):,}개 · 전표 변환 {counts.get("ecount_product_mappings",0):,}개\n기존 주문의 별칭·변환 규칙을 다시 적용했습니다.',parent=self.root)
-
-    def _cloud_login_failed(self,status,login_button,detail):
-        self.cloud_status.set('API 로그인 실패 · 다시 시도')
-        if status is not None:status.set(f'로그인 실패: {detail}')
-        if login_button is not None:login_button.configure(state='normal')
-
-    def _refresh_cloud_worker(self):
-        try:
-            catalog,counts=load_catalog(self.cloud_client,self.service.reference_dir)
-            self.root.after(0,lambda:self._cloud_refresh_success(catalog,counts))
-        except Exception as exc:
-            detail=str(exc);self.root.after(0,lambda:self._cloud_refresh_failed(detail))
-
-    def _cloud_refresh_success(self,catalog,counts):
-        self.service.catalog=catalog
-        try:
-            changed=self.cloud_workspace.pull_if_newer() if self.cloud_workspace else False
-            self.service.refresh_matches()
-            self.refresh()
-            if changed:
-                self.refresh()
-                self.load_matching_profile()
-            if self.cloud_workspace:self.cloud_workspace.push_if_changed()
-            version=self.cloud_workspace.version if self.cloud_workspace else 0
-            self.cloud_status.set(f'공유 DB 연결됨 · v{version}')
-            messagebox.showinfo('API 새로고침',f"최신 원격 품목 {counts.get('ecount_item_reference',0):,}개와 공유 DB를 반영했습니다.",parent=self.root)
-        except Exception as exc:
-            self._cloud_refresh_failed(str(exc))
-
-    def _cloud_refresh_failed(self,detail):
-        self.cloud_status.set('API 연결 오류')
-        messagebox.showerror('API 새로고침 실패',detail,parent=self.root)
-
-    def poll_cloud_workspace(self):
-        if self._quitting or not self.cloud_workspace:
-            return
-        try:
-            if self.root.grab_current() is None and self.cloud_workspace.pull_if_newer():
-                self.refresh()
-                self.load_matching_profile()
-            self.cloud_status.set(f'공유 DB 연결됨 · v{self.cloud_workspace.version}')
-        except WorkspaceConflict:
-            self.cloud_status.set('공유 DB 충돌 · 새로고침')
-        except Exception:
-            self.cloud_status.set('공유 DB 연결 확인 중')
-        self.root.after(5000,self.poll_cloud_workspace)
-
     def on_search_changed(self,*_):
         self.refresh_orders();self.update_search_suggestions()
 
@@ -928,7 +810,7 @@ class Desktop:
         ttk.Label(identity,textvariable=self.matching_analysis,foreground='#2563EB').grid(row=4,column=1,columnspan=3,sticky='w',pady=(2,5))
         ttk.Label(identity,text='엑셀 비밀번호').grid(row=5,column=0,sticky='w',padx=(0,12),pady=5)
         ttk.Entry(identity,textvariable=self.matching_password,show='•').grid(row=5,column=1,sticky='ew',pady=5)
-        ttk.Label(identity,text='API 로그인 시 모든 PC의 공유 설정으로 저장됩니다.',foreground='#64748B').grid(row=5,column=2,columnspan=2,sticky='w',padx=8)
+        ttk.Label(identity,text='이 PC의 로컬 설정 파일에 저장됩니다.',foreground='#64748B').grid(row=5,column=2,columnspan=2,sticky='w',padx=8)
         identity.columnconfigure(1,weight=1); identity.columnconfigure(3,weight=2)
 
         mapping = ttk.LabelFrame(right,text='02  주문 파일 열 연결',padding=13)
@@ -1203,33 +1085,14 @@ class Desktop:
         temporary.write_text(json.dumps(self.service.settings,ensure_ascii=False,indent=2),encoding='utf-8')
         os.replace(temporary,path)
         self.service.settings = settings_at(self.service.folder)
-        destination = '공유 DB와 이 PC' if self.cloud_workspace else '이 PC'
-        messagebox.showinfo('매칭 설정 저장',f'{channel}의 파일명과 열 설정을 {destination}에 저장했습니다.',parent=self.root)
+        messagebox.showinfo('매칭 설정 저장',f'{channel}의 파일명과 열 설정을 이 PC에 저장했습니다.',parent=self.root)
 
     def button(self,parent,label,fn,style='TButton'):
         ttk.Button(parent,text=label,style=style,command=lambda:self.safe(fn)).pack(side='left',padx=4)
 
     def safe(self,fn):
-        before=None
         try:
-            if self.cloud_workspace:
-                if self.cloud_workspace.pull_if_newer():
-                    self.refresh()
-                    self.load_matching_profile()
-                    messagebox.showinfo('공유 DB 갱신','다른 PC의 최신 작업을 반영했습니다. 항목을 다시 선택해 작업해주세요.',parent=self.root)
-                    return
-                before=self.cloud_workspace.snapshot()
             fn()
-            if self.cloud_workspace:
-                self.cloud_workspace.push_if_changed()
-                self.cloud_status.set(f'공유 DB 연결됨 · v{self.cloud_workspace.version}')
-        except WorkspaceConflict as exc:
-            if self.cloud_workspace and before is not None:
-                self.cloud_workspace.restore(before)
-                try:self.cloud_workspace.pull_if_newer()
-                except Exception:pass
-                self.refresh()
-            messagebox.showerror('동시 작업 충돌',f'{exc}\n현재 작업은 적용하지 않았습니다. 최신 화면에서 다시 시도하세요.',parent=self.root)
         except Exception as exc:
             messagebox.showerror('작업 확인',str(exc),parent=self.root)
 
@@ -1496,18 +1359,13 @@ class Desktop:
         )
         source_names={Path(path).name for path in paths}
         imported=[order for order in self.service.orders() if order['data'].get('source_file') in source_names]
-        history_duplicates=0
-        if self.cloud_client and imported:
-            try:history_duplicates=self.service.check_shipping_history(self.cloud_client,[order['id'] for order in imported])
-            except Exception:pass
         self.refresh()
         stats=self.service.match_statistics(imported)
         methods=' · '.join(f'{name} {count}건' for name,count in stats['methods'].items())
         messagebox.showinfo(title,
             f"파일 {len(paths)}개 분석 완료\n신규 {new}건 · 동일 주문 제외 {duplicate}건\n\n"
             f"자동 확정 {stats['ready']}건 ({stats['rate']}%) · 확인 필요 {stats['review']}건\n"
-            f"{methods or '적용된 자동 규칙 없음'}"
-            +(f"\n출고 프로그램 이력 중복 {history_duplicates}건" if history_duplicates else ''),parent=self.root)
+            f"{methods or '적용된 자동 규칙 없음'}",parent=self.root)
 
     def refresh_channel_status(self):
         files = {channel:set() for channel in SALES_CHANNELS}
@@ -1633,34 +1491,9 @@ class Desktop:
             for component in components: component['quantity'] = '1'
             self.service.set_mapping(key,components)
             affected=sum(1 for order in self.service.orders() if self.service.mapping_key(order['data'])==self.service.mapping_key(d))
-            alias_result='이 PC와 공유 작업공간에 저장했습니다.'
-            if save_alias.get():
-                if not self.cloud_client:
-                    alias_result='로컬 매칭은 저장했습니다. 출고 DB 별칭 저장은 API 로그인 후 사용할 수 있습니다.'
-                else:
-                    payload={
-                        'source_channel':d['channel'],
-                        'source_product_name':d['product'],
-                        'source_options':d['option'],
-                        'normalized_source':compact(f"{d['product']} {d['option']}"),
-                        'components':[{'item_code':component['code'],'quantity':1,'sequence':index}
-                                      for index,component in enumerate(components,1)],
-                        'is_active':True,
-                    }
-                    try:
-                        self.cloud_client.table('item_aliases').upsert(
-                            payload,on_conflict='source_channel,normalized_source').execute()
-                        shipping=self.service._shipping_catalog()
-                        if shipping is not None:
-                            shipping.aliases[(channel_key(d['channel']),payload['normalized_source'])]=[payload]
-                        alias_result='로컬 매칭과 출고 DB 공용 별칭을 저장했습니다.'
-                    except Exception as exc:
-                        alias_result=f'로컬 매칭은 저장했습니다. 출고 DB 별칭 저장 실패: {exc}'
             self.refresh(); win.destroy()
-            messagebox.showinfo('매칭 저장',f'{alias_result}\n동일 상품·옵션 주문 {affected}건을 다시 매칭했습니다.',parent=self.root)
+            messagebox.showinfo('매칭 저장',f'이 PC의 로컬 DB에 저장했습니다.\n동일 상품·옵션 주문 {affected}건을 다시 매칭했습니다.',parent=self.root)
         line=ttk.Frame(win,padding=12); line.pack(fill='x')
-        save_alias=tk.BooleanVar(value=True)
-        ttk.Checkbutton(line,text='출고 프로그램 DB 별칭에도 저장',variable=save_alias).pack(side='left',padx=(0,12))
         self.button(line,'구성품 추가',add_row);self.button(line,'마지막 구성품 제거',remove_row)
         self.button(line,'같은 상품·옵션 전체에 매칭 저장',save,style='Accent.TButton')
 
@@ -1887,8 +1720,8 @@ class Desktop:
             filetypes=[('스마트스토어 출고파일','*.xlsx *.xlsm *.xls *.csv')],
         )
         if path:
-            new,duplicate=self.service.import_smartstore_erp(path,self.erp_ship_day.get());self.refresh()
-            messagebox.showinfo('반영 완료',f'스마트스토어 출고파일 {new}행 · 중복 제외 {duplicate}행')
+            new,duplicate=self.service.import_smartstore_erp(path,None);self.refresh()
+            messagebox.showinfo('반영 완료',f'스마트스토어 출고파일 {new}행 · 중복 제외 {duplicate}행\n원본 결제일 기준으로 저장했습니다.')
 
     def smartstore_purchase_results(self):
         path=filedialog.askopenfilename(
@@ -1896,8 +1729,8 @@ class Desktop:
             filetypes=[('스마트스토어 구매확정파일','*.xlsx *.xlsm *.xls *.csv')],
         )
         if path:
-            new,duplicate=self.service.import_smartstore_purchase(path,self.erp_ship_day.get());self.refresh()
-            messagebox.showinfo('반영 완료',f'스마트스토어 구매확정 {new}행 · 중복 제외 {duplicate}행')
+            new,duplicate=self.service.import_smartstore_purchase(path,None);self.refresh()
+            messagebox.showinfo('반영 완료',f'스마트스토어 구매확정 {new}행 · 중복 제외 {duplicate}행\n원본 결제일 기준으로 저장했습니다.')
 
     def save_esm_login(self):
         save_credentials(
@@ -1968,7 +1801,9 @@ class Desktop:
     def refresh_esm_entries(self):
         if not hasattr(self,'esm_entries'):return
         self.esm_entries.delete(*self.esm_entries.get_children())
-        for entry in self.service.esm_erp_entries():
+        selected_from=None if self.esm_show_all else date.fromisoformat(self.esm_view_from.get()).isoformat()
+        selected_through=None if self.esm_show_all else date.fromisoformat(self.esm_view_through.get()).isoformat()
+        for entry in self.service.esm_erp_entries(selected_from,selected_through):
             status='ERP 반영 완료' if entry['erp_id'] else entry['issue'] or '변환 준비'
             self.esm_entries.insert('', 'end', iid=entry['id'], values=[
                 entry['day'],entry['channel'],entry['order_no'],entry['product'],entry['option'],
@@ -1977,6 +1812,28 @@ class Desktop:
             ],tags=('review',) if entry['issue'] and not entry['erp_id'] else ())
         self.esm_entries.tag_configure('review',foreground='#BE123C',background='#FFF1F2')
         self.root.after_idle(lambda:autosize_tree(self.esm_entries,maximum=340))
+
+    def show_esm_day(self):
+        start=date.fromisoformat(self.esm_view_from.get()).isoformat()
+        end=date.fromisoformat(self.esm_view_through.get()).isoformat()
+        if start>end:raise ValueError('조회 시작일은 종료일보다 늦을 수 없습니다.')
+        self.esm_show_all=False
+        self.refresh_esm_entries()
+
+    def show_all_esm(self):
+        self.esm_show_all=True
+        self.refresh_esm_entries()
+
+    def delete_esm_entries(self):
+        ids=list(self.selected(self.esm_entries))
+        if not messagebox.askyesno(
+            '옥션/지마켓 주문 삭제',
+            f'선택한 주문 {len(ids):,}건을 삭제할까요?\nERP 반영 상태와 관계없이 변환 목록에서 삭제됩니다.',
+            parent=self.root,
+        ):return
+        deleted=self.service.delete_esm_erp_entries(ids)
+        self.refresh()
+        messagebox.showinfo('삭제 완료',f'옥션/지마켓 주문 {deleted:,}건을 삭제했습니다.',parent=self.root)
 
     def edit_esm_set(self):
         entry_id=self.selected(self.esm_entries)[0]
@@ -2060,7 +1917,10 @@ class Desktop:
             return
         self.confirmed_shipments.delete(*self.confirmed_shipments.get_children())
         self.confirmed_entry_ids={}
-        for index,entry in enumerate(self.service.confirmed_erp_entries(self.erp_ship_day.get())):
+        start=date.fromisoformat(self.erp_ship_from.get()).isoformat()
+        end=date.fromisoformat(self.erp_ship_through.get()).isoformat()
+        if start>end:raise ValueError('조회 시작일은 종료일보다 늦을 수 없습니다.')
+        for index,entry in enumerate(self.service.confirmed_erp_entries(start,end)):
             item_id=f'confirmed-{index}';self.confirmed_entry_ids[item_id]=entry['id']
             self.confirmed_shipments.insert('', 'end', iid=item_id, values=[
                 entry['source'],entry['day'],INTERNAL_TO_CHANNEL.get(entry['channel'],entry['channel']),
@@ -2076,7 +1936,22 @@ class Desktop:
     def selected_confirmed_entry(self):
         item_id=self.selected(self.confirmed_shipments)[0]
         entry_id=self.confirmed_entry_ids[item_id]
-        return next(entry for entry in self.service.confirmed_erp_entries(self.erp_ship_day.get()) if entry['id']==entry_id)
+        return next(entry for entry in self.service.confirmed_erp_entries(
+            self.erp_ship_from.get(),self.erp_ship_through.get()
+        ) if entry['id']==entry_id)
+
+    def delete_confirmed_shipments(self):
+        item_ids=list(self.selected(self.confirmed_shipments))
+        entry_ids=[self.confirmed_entry_ids[item_id] for item_id in item_ids]
+        unique_orders=len(set(entry_id.split(':',2)[1] if entry_id.startswith('SSERP:') else entry_id for entry_id in entry_ids))
+        if not messagebox.askyesno(
+            '출고 주문 삭제',
+            f'선택한 출고 주문 {unique_orders:,}건을 삭제할까요?\n이미 만든 출력 이력 파일은 그대로 유지됩니다.',
+            parent=self.root,
+        ):return
+        deleted=self.service.delete_confirmed_erp_entries(entry_ids)
+        self.refresh()
+        messagebox.showinfo('삭제 완료',f'출고 주문 {deleted:,}건을 삭제했습니다.',parent=self.root)
 
     def change_shipment_warehouse(self):
         entry=self.selected_confirmed_entry()
@@ -2111,17 +1986,22 @@ class Desktop:
             return
         self.erp_shipments.delete(*self.erp_shipments.get_children())
         self.amount_split_rows={}
-        for index,row in enumerate(self.service.pending_amount_splits(self.erp_ship_day.get())):
+        start=date.fromisoformat(self.erp_amount_from.get()).isoformat()
+        end=date.fromisoformat(self.erp_amount_through.get()).isoformat()
+        if start>end:raise ValueError('조회 시작일은 종료일보다 늦을 수 없습니다.')
+        for index,row in enumerate(self.service.pending_amount_splits(start,end)):
             item_id=f'amount-split-{index}';self.amount_split_rows[item_id]=row
             self.erp_shipments.insert('', 'end', iid=item_id, values=[
                 row['day'],row['channel'],row['order_no'],row['recipient'],row['component_count'],
-                f"{int(Decimal(row['total'])):,}",row['summary'],
+                f"{int(Decimal(row['total'])):,}",row.get('product',''),row.get('option',''),row['summary'],
             ])
         self.root.after_idle(lambda:autosize_tree(self.erp_shipments,maximum=320))
 
     def split_order_amount(self):
         item_id=self.selected(self.erp_shipments)[0]
         row=self.amount_split_rows[item_id]
+        if row.get('kind')=='smartstore' and len(row['components']) < 2:
+            raise ValueError('먼저 스마트스토어 상품·세트 매칭에서 구성품을 2개 이상 등록하세요.')
         win=tk.Toplevel(self.root);win.title('구성품별 금액 나누기');win.geometry('900x600');win.transient(self.root);win.grab_set()
         ttk.Label(win,text='구성품별 금액 나누기',font=(self.font_family,17,'bold'),padding=(18,16)).pack(anchor='w')
         ttk.Label(win,text=f"주문번호 {row['order_no']} · {row['recipient']}",padding=(18,0)).pack(anchor='w')
@@ -2181,6 +2061,14 @@ class Desktop:
             variable.trace_add('write',refresh_totals)
         refresh_totals()
 
+    def open_amount_split_action(self):
+        item_id=self.selected(self.erp_shipments)[0]
+        row=self.amount_split_rows[item_id]
+        if row.get('kind')=='smartstore':
+            self.edit_erp_set()
+        else:
+            self.split_order_amount()
+
     def match_erp_amount(self):
         shipment_id=self.selected(self.erp_shipments)[0]
         shipment=next(row for row in self.service.pending_erp_entries() if row['id']==shipment_id)
@@ -2194,7 +2082,11 @@ class Desktop:
         self.refresh_erp_shipments()
 
     def edit_erp_set(self):
-        entry_id=self.selected(self.erp_shipments)[0]
+        item_id=self.selected(self.erp_shipments)[0]
+        selected_row=self.amount_split_rows[item_id]
+        if selected_row.get('kind')!='smartstore':
+            raise ValueError('스마트스토어 미매칭 또는 세트 주문을 선택하세요.')
+        entry_id=selected_row['id']
         row=self.service.smartstore_erp_row(entry_id)
         if not row:
             raise ValueError('세트 구성 수정은 스마트스토어 ERP 입력 건에서 사용할 수 있습니다.')
@@ -2204,10 +2096,16 @@ class Desktop:
         ttk.Label(win,text=f"{data.get('order_no')}  |  {data.get('product')} / {data.get('option')}",padding=(16,0)).pack(anchor='w')
         ttk.Label(win,text='첫 구성품은 주문 총금액에서 부속품 단가를 뺀 금액으로 자동 계산됩니다.',foreground='#64748B',padding=(16,6)).pack(anchor='w')
         grid=ttk.Frame(win,padding=16);grid.pack(fill='both',expand=True)
-        labels=['ERP 품목코드','품목명','부속품 단가','출하창고','거래처코드']
+        labels=['ERP 품목코드','품목명','부속품 단가','출하창고','거래처코드','계산 반영금액']
         for column,label in enumerate(labels):ttk.Label(grid,text=label).grid(row=0,column=column,padx=4,pady=6,sticky='w')
+        for column in (0,1,4):grid.columnconfigure(column,weight=2)
         entries=[]
+        order_total=Decimal(data.get('amount') or '0')
+        source_quantity=max(1,int(Decimal(data.get('quantity') or '1')))
         customer=self.service.channel_customer_code('리큐엠_스마트스토어')
+        customer_choices=self.service.customer_choices()
+        item_choices={item['code']:item['name'] for item in self.service.item_choices()}
+        catalog_choices=[f'{code} · {name}' if name else code for code,name in item_choices.items()]
         def add_row(component=None):
             component=component or {}
             index=len(entries)
@@ -2222,28 +2120,99 @@ class Desktop:
             }
             widgets=[]
             for column,key in enumerate(('code','name','unit_amount','warehouse','customer')):
-                widget=ttk.Entry(grid,textvariable=values[key],width=(24 if key in ('code','customer') else 34 if key=='name' else 13))
+                if key in ('code','warehouse','customer'):
+                    choices=(catalog_choices if key=='code' else
+                             ['100 본사창고','300 위킵창고'] if key=='warehouse' else customer_choices)
+                    widget=ttk.Combobox(
+                        grid,textvariable=values[key],values=choices,
+                        width=(30 if key in ('code','customer') else 16),
+                    )
+                    def chosen(_event,values=values,key=key):
+                        value=_event.widget.get().split(' · ',1)[0]
+                        values[key].set(value)
+                        if key=='code':
+                            values['name'].set(self.service.item_name(value,item_choices.get(value,value)))
+                    widget.bind('<<ComboboxSelected>>',chosen)
+                    def search_catalog(event,widget=widget,choices=choices):
+                        if event.keysym in ('Up','Down','Left','Right','Return','Escape','Tab'):return
+                        query=widget.get();cursor=widget.index('insert')
+                        def update():
+                            if widget.get()!=query:return
+                            post_combobox(widget,filter_combobox_choices(query,choices))
+                            widget.icursor(min(cursor,len(query)))
+                        widget.after_idle(update)
+                    widget.bind('<KeyRelease>',search_catalog)
+                    bind_wide_combobox(widget)
+                else:
+                    widget=ttk.Entry(grid,textvariable=values[key],width=(34 if key=='name' else 13))
+                widget.bind('<Double-1>',self.select_all_text)
                 widget.grid(row=index+1,column=column,padx=4,pady=4,sticky='ew');widgets.append(widget)
-            entries.append((values,widgets))
+            calculated=tk.StringVar(value='계산 중')
+            calculated_label=ttk.Label(grid,textvariable=calculated,font=(self.font_family,10,'bold'))
+            calculated_label.grid(row=index+1,column=5,padx=4,pady=4,sticky='w');widgets.append(calculated_label)
+            entries.append((values,widgets,calculated))
         for component in row['components']:add_row(component)
         if not entries:add_row()
         def remove_row():
             if len(entries)>1:
-                _,widgets=entries.pop()
+                _,widgets,_=entries.pop()
                 for widget in widgets:widget.destroy()
+                refresh_totals()
         def save():
             components=[]
-            for values,_ in entries:
+            for values,_,_ in entries:
                 item={key:value.get().strip() for key,value in values.items()}
                 item.update({'logistics_code':item['code'],'quantity':'1'})
                 components.append(item)
             self.service.set_smartstore_erp_components(entry_id,components)
             win.destroy();self.refresh_erp_shipments();self.refresh_confirmed_shipments()
+        summary=ttk.Frame(win,padding=(16,4));summary.pack(fill='x')
+        total_text=tk.StringVar(value=f'주문 전체금액  {int(order_total):,}원')
+        entered_text=tk.StringVar()
+        difference_text=tk.StringVar()
+        ttk.Label(summary,textvariable=total_text,font=(self.font_family,11,'bold')).pack(anchor='w')
+        ttk.Label(summary,textvariable=entered_text,font=(self.font_family,11,'bold')).pack(anchor='w',pady=(5,0))
+        difference_label=ttk.Label(summary,textvariable=difference_text,font=(self.font_family,11,'bold'))
+        difference_label.pack(anchor='w',pady=(5,0))
         actions=ttk.Frame(win,padding=16);actions.pack(fill='x')
-        self.button(actions,'구성품 추가',lambda:add_row())
+        self.button(actions,'구성품 추가',lambda:(add_row(),bind_amount_traces(),refresh_totals()))
         self.button(actions,'마지막 구성품 삭제',remove_row,style='Danger.TButton')
-        self.button(actions,'세트 구성 저장',save,style='Accent.TButton')
+        save_button=ttk.Button(actions,text='세트 구성 저장',style='Accent.TButton',command=lambda:self.safe(save))
+        save_button.pack(side='left',padx=4)
         self.button(actions,'닫기',win.destroy)
+        traced=set()
+        def refresh_totals(*_):
+            try:
+                accessory=[]
+                for position,(values,_widgets,calculated) in enumerate(entries):
+                    unit=Decimal(values['unit_amount'].get().replace(',','').strip() or '0')
+                    amount=(order_total-sum(accessory,Decimal('0'))) if position==0 else unit*source_quantity
+                    if position>0:accessory.append(amount)
+                    calculated.set(f'{int(amount):,}원')
+                accessory_total=sum(accessory,Decimal('0'))
+                main_amount=order_total-accessory_total
+                if entries:entries[0][2].set(f'{int(main_amount):,}원')
+                entered=main_amount+accessory_total
+                entered_text.set(f'현재 입력 합계  {int(entered):,}원')
+                difference=accessory_total-order_total
+                if difference>0:
+                    difference_text.set(f'부속품 합계가 전체금액 대비 +{int(difference):,}원 초과')
+                    difference_label.configure(foreground='#BE123C');save_button.state(['disabled'])
+                else:
+                    difference_text.set('전체금액과 일치합니다.')
+                    difference_label.configure(foreground='#15803D');save_button.state(['!disabled'])
+            except (InvalidOperation,ValueError):
+                entered_text.set('현재 입력 합계  계산할 수 없음')
+                difference_text.set('금액에는 숫자와 쉼표만 입력하세요.')
+                difference_label.configure(foreground='#BE123C');save_button.state(['disabled'])
+                for _values,_widgets,calculated in entries:calculated.set('확인 필요')
+        def bind_amount_traces():
+            for values,_widgets,_calculated in entries:
+                variable=values['unit_amount']
+                token=str(variable)
+                if token not in traced:
+                    variable.trace_add('write',refresh_totals);traced.add(token)
+        bind_amount_traces();refresh_totals()
 
     def erp(self):
         path=self.save_path('ERP_'+self.voucher.get()+'.xlsx')

@@ -15,7 +15,7 @@ from reqm_local.files import (
     profile_column_choices, read_rows, related_column_choices, sample_header_names,
     settings_at, workbook_bytes,
 )
-from reqm_local.service import Operations
+from reqm_local.service import Operations, encode
 from reqm_local.shipping import ShippingCatalog, compact
 from reqm_local.ui_helpers import (
     combobox_text_width, filter_combobox_choices, search_suggestions, tree_sort_value,
@@ -56,6 +56,17 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(amount_split_totals('39,900',['39900','6900'])[2],Decimal('6900'))
         self.assertEqual(amount_split_totals('39,900',['30000',''])[2],Decimal('-9900'))
         self.assertIsNone(amount_split_totals('39,900',['문자','6900']))
+
+    def test_smartstore_repricing_ignores_single_item_amount_and_keeps_accessory_code_price(self):
+        single=[dict(code='MAIN',name='본품',quantity=1,amount='39900')]
+        self.assertEqual(Operations._reprice_components(single,'6816',1)[0]['amount'],'6816')
+        multi=[
+            dict(code='MAIN',name='본품',quantity=1,amount='33000'),
+            dict(code='CASE',name='케이스1',quantity=1,amount='6900'),
+            dict(code='CASE',name='케이스2',quantity=1,amount='7900'),
+        ]
+        repriced=Operations._reprice_components(multi,'50000',1)
+        self.assertEqual([item['amount'] for item in repriced],['36200','6900','6900'])
 
     def test_tree_sort_values_handle_numbers_and_text(self):
         self.assertLess(tree_sort_value('2'),tree_sort_value('10'))
@@ -680,7 +691,7 @@ class LocalTests(unittest.TestCase):
             'enabled':True,'header_row':1,'filename_hints':['smartstore-shipping'],
             'columns':{
                 'order_no':['주문번호'],'line_no':['상품주문번호'],'product':['상품명'],
-                'option':['옵션'],'quantity':['수량'],'amount':['금액'],
+                'option':['옵션'],'quantity':['수량'],'amount':['금액'],'paid_at':['결제일'],
             },
         })
         purchase_profile=next(profile for profile in self.s.settings['profiles'] if profile.get('purpose')=='smartstore_purchase_erp')
@@ -688,26 +699,27 @@ class LocalTests(unittest.TestCase):
             'enabled':True,'header_row':1,'filename_hints':['smartstore-purchase'],
             'columns':{
                 'order_no':['주문번호'],'line_no':['상품주문번호'],'product':['상품명'],
-                'option':['옵션'],'quantity':['수량'],'amount':['구매확정금액'],'paid_at':['구매확정일'],
+                'option':['옵션'],'quantity':['수량'],'amount':['구매확정금액'],'paid_at':['결제일'],
             },
         })
         shipping=self.folder/'smartstore-shipping.xlsx'
         shipping.write_bytes(workbook_bytes(
-            ['주문번호','상품주문번호','상품명','옵션','수량','금액'],
-            [['O1','A1','테스트상품','기본',2,20000]],
+            ['주문번호','상품주문번호','상품명','옵션','수량','금액','결제일'],
+            [['O1','A1','테스트상품','기본',2,20000,'2026-10-05']],
         ))
         purchase=self.folder/'smartstore-purchase.xlsx'
         purchase.write_bytes(workbook_bytes(
-            ['주문번호','상품주문번호','상품명','옵션','수량','구매확정금액','구매확정일'],
-            [['O1','A1','테스트상품','기본',2,18000,'2026-10-06']],
+            ['주문번호','상품주문번호','상품명','옵션','수량','구매확정금액','결제일'],
+            [['O1','A1','테스트상품','기본',2,18000,'2026-10-05']],
         ))
-        self.assertEqual(self.s.import_smartstore_erp(shipping,'2026-10-06'),(1,0))
-        self.assertEqual(self.s.import_smartstore_purchase(purchase,'2026-10-06'),(1,0))
-        self.assertEqual(self.s.import_smartstore_purchase(purchase,'2026-10-06'),(0,1))
+        self.assertEqual(self.s.import_smartstore_erp(shipping,None),(1,0))
+        self.assertEqual(self.s.import_smartstore_purchase(purchase,None),(1,0))
+        self.assertEqual(self.s.import_smartstore_purchase(purchase,None),(0,1))
         rows=self.s.db.execute('SELECT data,components FROM smartstore_erp_rows').fetchall()
         self.assertEqual(len(rows),1)
         self.assertEqual(json.loads(rows[0]['data'])['amount'],'18000')
         self.assertEqual(sum(int(item['amount']) for item in json.loads(rows[0]['components'])),18000)
+        self.assertEqual(self.s.db.execute('SELECT day FROM smartstore_erp_rows').fetchone()['day'],'2026-10-05')
 
     def test_smartstore_purchase_can_arrive_before_shipping_and_still_deduplicate(self):
         _,order=self.import_order(q=1,amount=10000,channel='리큐엠_스마트스토어');self.map(order)
@@ -720,18 +732,18 @@ class LocalTests(unittest.TestCase):
                 'enabled':True,'header_row':1,'filename_hints':[hint],
                 'columns':{
                     'order_no':['주문번호'],'line_no':['상품주문번호'],'product':['상품명'],
-                    'option':['옵션'],'quantity':['수량'],'amount':[amount_name],
+                    'option':['옵션'],'quantity':['수량'],'amount':[amount_name],'paid_at':['결제일'],
                 },
             })
         purchase=self.folder/'purchase-first-check.xlsx'
         purchase.write_bytes(workbook_bytes(
-            ['주문번호','상품주문번호','상품명','옵션','수량','구매확정금액'],
-            [['O1','A1','테스트상품','기본',1,9000]],
+            ['주문번호','상품주문번호','상품명','옵션','수량','구매확정금액','결제일'],
+            [['O1','A1','테스트상품','기본',1,9000,'2026-10-04']],
         ))
         shipping=self.folder/'shipping-first-check.xlsx'
         shipping.write_bytes(workbook_bytes(
-            ['주문번호','상품주문번호','상품명','옵션','수량','금액'],
-            [['O1','A1','테스트상품','기본',1,10000]],
+            ['주문번호','상품주문번호','상품명','옵션','수량','금액','결제일'],
+            [['O1','A1','테스트상품','기본',1,10000,'2026-10-04']],
         ))
         self.assertEqual(self.s.import_smartstore_purchase(purchase,'2026-10-06'),(1,0))
         self.assertEqual(self.s.import_smartstore_erp(shipping,'2026-10-06'),(1,0))
@@ -749,7 +761,7 @@ class LocalTests(unittest.TestCase):
             'enabled':True,'header_row':1,'filename_hints':['smartstore-erp'],
             'columns':{
                 'order_no':['주문번호'],'line_no':['상품주문번호'],'product':['상품명'],
-                'option':['옵션'],'quantity':['수량'],'amount':['금액'],
+                'option':['옵션'],'quantity':['수량'],'amount':['금액'],'paid_at':['결제일'],
             },
         })
         actual=self.folder/'smartstore-result.xlsx'
@@ -758,8 +770,8 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(self.s.db.execute('SELECT COUNT(*) FROM shipments').fetchone()[0],0)
         erp_source=self.folder/'smartstore-erp.xlsx'
         erp_source.write_bytes(workbook_bytes(
-            ['주문번호','상품주문번호','상품명','옵션','수량','금액'],
-            [['O1','A1','테스트상품','기본',2,20000]],
+            ['주문번호','상품주문번호','상품명','옵션','수량','금액','결제일'],
+            [['O1','A1','테스트상품','기본',2,20000,'2026-10-06']],
         ))
         self.assertEqual(self.s.import_smartstore_erp(erp_source,'2026-10-06'),(1,0))
         renamed_source=self.folder/'smartstore-erp-redownloaded.xlsx'
@@ -854,6 +866,74 @@ class LocalTests(unittest.TestCase):
         self.assertEqual(self.s.delete_orders([second['id']]),1)
         self.assertEqual(self.s.orders(),[])
 
+    def test_local_transition_backup_is_created_once(self):
+        backup=self.s.folder/'backups'/'supabase-to-local.sqlite3'
+        self.assertTrue(backup.exists())
+        original=backup.read_bytes()
+        self.s.event('백업 이후 변경','로컬 변경')
+        self.s.db.commit()
+        self.assertEqual(self.s.ensure_local_transition_backup(),backup)
+        self.assertEqual(backup.read_bytes(),original)
+
+    def test_confirmed_and_esm_entries_can_be_deleted(self):
+        _,order=self.import_order(line='DELETE-SHIPMENT')
+        line=self.request(order)
+        result=self.folder/'delete-shipment.xlsx'
+        result.write_bytes(workbook_bytes(RESULT_COLUMNS,[[line,1,'TRACK-DELETE','2026-10-06']]))
+        self.s.import_results(result)
+        shipment=self.s.confirmed_erp_entries('2026-10-06')[0]
+        self.assertEqual(self.s.delete_confirmed_erp_entries([shipment['id']]),1)
+        self.assertEqual(self.s.confirmed_erp_entries('2026-10-06'),[])
+
+        with self.s.db:
+            self.s.db.execute(
+                'INSERT INTO esm_erp_rows VALUES(?,?,?,?,?,?,?)',
+                ('esm-delete','esm-delete-identity','2026-10-07',encode({
+                    'channel':'옥션','order_no':'ESM-DELETE','product':'상품','option':'옵션',
+                    'quantity':'1','unit_amount':'1000','amount':'1000',
+                }),'[]',None,'미매칭'),
+            )
+        self.assertEqual(len(self.s.esm_erp_entries('2026-10-07')),1)
+        self.assertEqual(self.s.delete_esm_erp_entries(['ESM:esm-delete']),1)
+        self.assertEqual(self.s.esm_erp_entries('2026-10-07'),[])
+
+    def test_actual_and_esm_views_filter_inclusive_date_ranges(self):
+        _,first=self.import_order(line='RANGE-1');first_line=self.request(first)
+        self.result(first_line,3,'TRACK-RANGE-1','2026-10-05')
+        _,second=self.import_order(line='RANGE-2');second_line=self.request(second)
+        self.result(second_line,3,'TRACK-RANGE-2','2026-10-07')
+        self.assertEqual(
+            [row['day'] for row in self.s.confirmed_erp_entries('2026-10-05','2026-10-06')],
+            ['2026-10-05'],
+        )
+        with self.s.db:
+            for suffix,row_day in (('1','2026-10-05'),('2','2026-10-07')):
+                self.s.db.execute(
+                    'INSERT INTO esm_erp_rows VALUES(?,?,?,?,?,?,?)',
+                    (f'esm-range-{suffix}',f'esm-range-identity-{suffix}',row_day,encode({
+                        'channel':'옥션','order_no':f'ESM-RANGE-{suffix}','product':'상품','option':'옵션',
+                        'quantity':'1','unit_amount':'1000','amount':'1000',
+                    }),'[]',None,'미매칭'),
+                )
+        self.assertEqual(
+            [row['day'] for row in self.s.esm_erp_entries('2026-10-06','2026-10-07')],
+            ['2026-10-07'],
+        )
+
+    def test_erp_rows_merge_when_customer_item_and_unit_price_match(self):
+        def row(customer,code,quantity,unit,warehouse=300):
+            total=quantity*unit;supply=round(total/1.1)
+            return [None,None,customer,None,'M',warehouse,None,None,None,None,None,None,code,None,None,
+                    quantity,unit,None,supply,total-supply,None,None]
+        merged=self.s._merge_erp_rows([
+            row('C1','ITEM-1',2,10000),row('C1','ITEM-1',3,10000),row('C1','ITEM-1',1,9000),
+            row('C2','ITEM-1',1,10000),
+        ])
+        self.assertEqual([(item[2],item[12],item[15],item[16]) for item in merged],[
+            ('C1','ITEM-1',5,10000),('C1','ITEM-1',1,9000),('C2','ITEM-1',1,10000),
+        ])
+        self.assertEqual(merged[0][18]+merged[0][19],50000)
+
     def test_event_rule_transforms_matching_pending_and_new_orders(self):
         path,order=self.import_order(line='EVENT-1',amount=12000,product='행사 전 상품')
         components=[dict(code='EVENT-A',logistics_code='W-EVENT-A',name='이벤트 본품',quantity=1,unit_amount=0,warehouse='300',customer='EVENT-C'),
@@ -925,6 +1005,38 @@ class LocalTests(unittest.TestCase):
         book=load_workbook(target,data_only=True);rows=list(book.active.values)[1:];book.close()
         totals={code:sum(row[15]*row[16] for row in rows if row[12]==code) for code in ('MAIN','CASE')}
         self.assertEqual(totals,{'MAIN':15000,'CASE':5000})
+
+    def test_smartstore_unmatched_rows_can_be_matched_and_split_in_date_range(self):
+        data={
+            'channel':'리큐엠_스마트스토어','account':'기본','order_no':'SMART-1','line_no':'LINE-1',
+            'product':'스마트 세트','option':'기본','quantity':'1','amount':'39900','recipient':'구매자',
+        }
+        with self.s.db:
+            self.s.db.execute('''INSERT INTO smartstore_erp_rows
+                (id,identity,day,data,components,erp_id,issue) VALUES(?,?,?,?,?,?,?)''',(
+                'SMART-ROW','SMART-IDENTITY','2026-10-08',encode(data),encode([]),None,'상품 매칭 필요',
+            ))
+            other={**data,'account':'다른 계정','order_no':'SMART-2','line_no':'LINE-2','amount':'45000','recipient':'다른 구매자'}
+            self.s.db.execute('''INSERT INTO smartstore_erp_rows
+                (id,identity,day,data,components,erp_id,issue) VALUES(?,?,?,?,?,?,?)''',(
+                'SMART-ROW-2','SMART-IDENTITY-2','2026-10-08',encode(other),encode([]),None,'상품 매칭 필요',
+            ))
+        self.assertEqual(self.s.pending_amount_splits('2026-10-07','2026-10-08')[0]['kind'],'smartstore')
+        self.assertEqual(self.s.pending_amount_splits('2026-10-07','2026-10-07'),[])
+        self.s.set_smartstore_erp_components('SSERP:SMART-ROW:0',[
+            dict(code='MAIN',logistics_code='MAIN',name='본품',quantity='1',unit_amount='0',warehouse='300',customer='C'),
+            dict(code='CASE',logistics_code='CASE',name='케이스',quantity='1',unit_amount='6900',warehouse='300',customer='C'),
+        ])
+        self.assertEqual(self.s.pending_amount_splits('2026-10-08','2026-10-09'),[])
+        first=self.s.smartstore_erp_row('SSERP:SMART-ROW:0')
+        second=self.s.smartstore_erp_row('SSERP:SMART-ROW-2:0')
+        self.assertEqual((first['data']['product'],first['data']['option']),('스마트 세트','기본'))
+        self.assertEqual([(item['code'],item['amount']) for item in first['components']],[('MAIN','33000'),('CASE','6900')])
+        self.assertEqual([(item['code'],item['amount']) for item in second['components']],[('MAIN','38100'),('CASE','6900')])
+        self.assertEqual((first['amount_split_confirmed'],second['amount_split_confirmed']),(1,1))
+        self.assertIsNotNone(self.s.db.execute(
+            'SELECT 1 FROM mappings WHERE key=?',(self.s.mapping_key(second['data']),)
+        ).fetchone())
 
     def test_actual_shipment_item_and_warehouse_override_only_affects_export(self):
         _,order=self.import_order(q=1,amount=10000,fee=0)
