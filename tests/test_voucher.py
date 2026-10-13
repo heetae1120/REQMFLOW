@@ -1,0 +1,186 @@
+import io
+import json
+import tempfile
+import unittest
+import uuid
+from pathlib import Path
+from decimal import Decimal
+from openpyxl import load_workbook
+from reqm_local.service import Operations, encode
+from reqm_local.workspace_cloud import export_workspace, import_workspace, workspace_digest
+from tests.test_tracking import ORDER, DAY, REFERENCE
+
+
+class VoucherTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory();self.folder=Path(self.temp.name)
+        self.s=Operations(self.folder/'data', REFERENCE)
+
+    def tearDown(self):
+        self.s.close();self.temp.cleanup()
+
+    def order(self, number='A', white=False, total=34900, qty=1, channel='오늘의집', fee=3000, bundle=''):
+        oid=uuid.uuid4().hex
+        data={**ORDER,'channel':channel,'account':'worker','order_no':number,'quantity':str(qty),
+              'amount':str(total),'shipping':str(fee),'bundle':bundle,'memo':''}
+        codes=['[RQM]-QP2000C1-WH' if white else '[RQM]-QP2000C1-BK',
+               'RQM-CC150-CK-PK' if white else 'RQM-CC150-CK-BL']
+        components=[{'code':code,'logistics_code':code,'name':self.s.item_name(code),
+                     'quantity':qty,'amount':str(total if i==0 else 0),'warehouse':'300','customer':'DEMO'}
+                    for i,code in enumerate(codes)]
+        with self.s.db:
+            self.s.db.execute('INSERT INTO orders VALUES(?,?,?,?,?,?)',(oid,oid,encode(data),encode(components),'출고 준비',''))
+        batch=self.s.request([oid],DAY)
+        self.s.auto_import_shipments(DAY)
+        return next(r for r in self.s.voucher_rows(DAY,DAY) if r['order_id']==oid)
+
+    def test_other_colour_reuses_allocation_and_scales_order_quantity(self):
+        a=self.order();b=self.order('B',True,total=69800,qty=2)
+        self.s.set_voucher_amounts(a['id'],34900,[28000,6900])
+        self.assertEqual(self.s.reuse_voucher_amounts(DAY,DAY),1)
+        b=next(r for r in self.s.voucher_rows(DAY,DAY) if r['id']==b['id'])
+        self.assertEqual([c['amount'] for c in b['components']],['56000','13800'])
+        self.assertEqual(b['components'][0]['code'],'[RQM]-QP2000C1-WH')
+        self.assertTrue(b['confirmed'])
+
+    def test_changed_price_channel_model_and_partial_shipment_do_not_reuse(self):
+        a=self.order();self.s.set_voucher_amounts(a['id'],34900,[28000,6900])
+        b=self.order('B',True,total=33900);c=self.order('C',True,channel='무신사')
+        self.assertIsNone(self.s.voucher_suggestion(b));self.assertIsNone(self.s.voucher_suggestion(c))
+        changed={**a,'components':[dict(p) for p in a['components']]}
+        changed['components'][0]['code']='[RQM]-QP1000C1-WH'
+        self.assertIsNone(self.s.voucher_suggestion(changed))
+        self.assertIsNone(self.s.voucher_suggestion({**a,'full':False}))
+
+    def test_conflicting_history_requires_manual_allocation(self):
+        a=self.order();b=self.order('B',True);c=self.order('C',True)
+        self.s.set_voucher_amounts(a['id'],34900,[28000,6900])
+        self.s.set_voucher_amounts(b['id'],34900,[29000,5900])
+        self.assertIsNone(self.s.voucher_suggestion(c))
+        self.assertEqual(self.s.reuse_voucher_amounts(DAY,DAY),0)
+
+    def test_total_validation_is_atomic_and_manual_total_is_supported(self):
+        a=self.order();before=workspace_digest(export_workspace(self.s))
+        for total,amounts in ((34900,[28000,6000]),(34900,[-1,34901])):
+            with self.assertRaises(ValueError):self.s.set_voucher_amounts(a['id'],total,amounts)
+            self.assertEqual(workspace_digest(export_workspace(self.s)),before)
+        self.s.set_voucher_amounts(a['id'],40000,[30000,10000])
+        updated=self.s.voucher_rows(DAY,DAY)[0]
+        self.assertEqual(updated['total'],Decimal(40000))
+
+    def test_preview_does_not_mark_rows_and_fee_once_per_order_not_bundle(self):
+        a=self.order(bundle='B1');b=self.order('A',True,bundle='B2')
+        for row in (a,b):self.s.set_voucher_amounts(row['id'],34900,[28000,6900])
+        before=workspace_digest(export_workspace(self.s))
+        rows=self.s.export_erp(DAY,DAY,None,from_day=DAY,preview=True)
+        self.assertEqual(workspace_digest(export_workspace(self.s)),before)
+        fees=[r for r in rows if r[12]=='택배운송비']
+        self.assertEqual([(r[15],r[16]) for r in fees],[(1,3000)])
+        self.assertTrue(all(r[0]==int(DAY.replace('-','')) and r[13] for r in rows))
+        target=self.folder/'voucher.xlsx'
+        batch=self.s.export_erp(DAY,DAY,target,from_day=DAY)
+        book=load_workbook(target);self.assertEqual(book.active['A2'].value,int(DAY.replace('-','')));book.close()
+        with self.assertRaises(ValueError):self.s.export_erp(DAY,DAY,target,from_day=DAY)
+        again=self.folder/'again.xlsx';self.s.regenerate_erp(batch,again)
+        book=load_workbook(again)
+        self.assertEqual(sum(r[12]=='택배운송비' for r in book.active.iter_rows(min_row=2,values_only=True)),1)
+        book.close()
+
+    def test_shipping_conflict_rolls_back_and_override_is_shared(self):
+        a=self.order(fee=3000);b=self.order('A',True,fee=4000)
+        for row in (a,b):self.s.set_voucher_amounts(row['id'],34900,[28000,6900])
+        before=workspace_digest(export_workspace(self.s))
+        with self.assertRaisesRegex(ValueError,'배송비'):self.s.export_erp(DAY,DAY,self.folder/'bad.xlsx',from_day=DAY)
+        self.assertEqual(workspace_digest(export_workspace(self.s)),before)
+        self.assertFalse((self.folder/'bad.xlsx').exists())
+        self.s.set_voucher_fee(a['data'],3500)
+        rows=self.s.export_erp(DAY,DAY,None,from_day=DAY,preview=True)
+        self.assertEqual([r[16] for r in rows if r[12]=='택배운송비'],[3500])
+        other=Operations(self.folder/'other',REFERENCE)
+        try:
+            import_workspace(other,export_workspace(self.s))
+            self.assertEqual(other.voucher_fee(a['data']),Decimal(3500))
+        finally:other.close()
+
+    def test_first_partial_export_charges_fee_only_once_and_legacy_fee_is_respected(self):
+        a=self.order();self.s.set_voucher_amounts(a['id'],34900,[28000,6900])
+        sid=a['components'][1]['entry_id']
+        with self.s.db:self.s.db.execute('UPDATE shipments SET day=? WHERE id=?',('2026-10-14',sid))
+        self.s.export_erp(DAY,DAY,self.folder/'first.xlsx',from_day=DAY)
+        rows=self.s.export_erp('2026-10-14','2026-10-14',None,from_day='2026-10-14',preview=True)
+        self.assertFalse(any(r[12]=='택배운송비' for r in rows))
+
+    def test_opt_out_is_not_learned_on_next_batch(self):
+        a=self.order();b=self.order('B',True)
+        self.s.set_voucher_amounts(a['id'],34900,[28000,6900],remember=False)
+        self.assertEqual(self.s.reuse_voucher_amounts(DAY,DAY),0)
+        self.assertIsNone(self.s.voucher_suggestion(b))
+
+    def test_smartstore_and_esm_shipping_are_included_without_bundle_column(self):
+        for index,table in enumerate(('smartstore_erp_rows','esm_erp_rows')):
+            data={**ORDER,'channel':'스마트스토어' if index==0 else '옥션','account':'worker',
+                  'order_no':'DIRECT-'+str(index),'amount':'10000','shipping':'3000','quantity':'1'}
+            component={'code':'[RQM]-QP2000C1-BK','name':'QP2000C 블랙','quantity':1,
+                       'amount':'10000','customer':'DEMO','warehouse':'300'}
+            with self.s.db:
+                if index==0:
+                    self.s.db.execute('INSERT INTO smartstore_erp_rows(id,identity,day,data,components,issue,amount_split_confirmed) VALUES(?,?,?,?,?,?,?)',
+                                      ('SS','SS',DAY,encode(data),encode([component]),'',1))
+                else:
+                    self.s.db.execute('INSERT INTO esm_erp_rows VALUES(?,?,?,?,?,?,?)',
+                                      ('ESM','ESM',DAY,encode(data),encode([component]),None,''))
+        rows=self.s.export_erp(DAY,DAY,None,from_day=DAY,preview=True)
+        self.assertEqual(sum(r[15]*r[16] for r in rows),26000)
+        self.assertEqual(sum(r[15] for r in rows if r[12]=='택배운송비'),2)
+
+    def test_rules_round_trip_and_old_confirmed_splits_are_learned(self):
+        a=self.order();b=self.order('B',True)
+        # Simulate an allocation entered through the pre-existing split screen.
+        self.s.set_amount_split(a['order_id'],DAY,{0:28000,1:6900})
+        self.assertEqual(self.s.reuse_voucher_amounts(DAY,DAY),1)
+        other=Operations(self.folder/'other',REFERENCE)
+        try:
+            import_workspace(other,export_workspace(self.s))
+            self.assertEqual(other.voucher_suggestion(b),['28000','6900'])
+        finally:other.close()
+
+    def test_legacy_fee_regeneration_keeps_one_fee_for_a_shared_bundle(self):
+        a=self.order(bundle='BUNDLE');b=self.order('B',True,bundle='BUNDLE')
+        for row in (a,b):self.s.set_voucher_amounts(row['id'],34900,[28000,6900])
+        batch=self.s.export_erp(DAY,DAY,self.folder/'initial.xlsx',from_day=DAY)
+        with self.s.db:
+            self.s.db.execute('DELETE FROM fees')
+            self.s.db.execute('INSERT INTO fees VALUES(?,?)',(self.s.bundle_key(a['data']),batch))
+        target=self.folder/'legacy.xlsx';self.s.regenerate_erp(batch,target)
+        book=load_workbook(target)
+        self.assertEqual(sum(r[15] for r in book.active.iter_rows(min_row=2,values_only=True) if r[12]=='택배운송비'),1)
+        book.close()
+
+    def test_new_work_table_and_preview_open_without_modifying_data(self):
+        import os
+        import tkinter as tk
+        from unittest.mock import patch
+        from reqm_local.desktop import Desktop
+        a=self.order();self.s.set_voucher_amounts(a['id'],34900,[28000,6900])
+        root=tk.Tk();root.withdraw()
+        try:
+            with patch.dict(os.environ,{'REQM_SELF_TEST':'1'}):app=Desktop(root,self.s)
+            app.voucher_panel.start.set(DAY);app.voucher_panel.end.set(DAY)
+            app.voucher_panel.refresh();root.update_idletasks()
+            before=workspace_digest(export_workspace(self.s))
+            app.voucher_panel.preview();root.update_idletasks()
+            self.assertEqual(len(app.voucher_panel.tree.get_children()),2)
+            self.assertEqual(workspace_digest(export_workspace(self.s)),before)
+        finally:root.destroy()
+
+    def test_explicit_family_override_and_disable_are_saved_in_workspace(self):
+        code='[RQM]-QP2000C1-BK'
+        self.assertEqual(self.s.voucher_family(code),self.s.voucher_family('[RQM]-QP2000C1-WH'))
+        self.assertNotEqual(self.s.voucher_family(code),self.s.voucher_family('[RQM]-QP1000C1-WH'))
+        self.s.set_voucher_family(code,'')
+        self.assertEqual(self.s.voucher_family(code),'sku:'+code)
+        other=Operations(self.folder/'other',REFERENCE)
+        try:
+            import_workspace(other,export_workspace(self.s))
+            self.assertEqual(other.voucher_family(code),'sku:'+code)
+        finally:other.close()

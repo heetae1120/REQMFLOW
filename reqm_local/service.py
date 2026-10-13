@@ -26,6 +26,7 @@ from .esm import parse_esm_rows
 from .profiles import SMARTSTORE_PURCHASE_CHANNEL
 from .tracking_store import TrackingOperations
 from .output_names import without_brand_prefix
+from .voucher import VoucherOperations
 
 
 SMARTSTORE_CHANNEL = '리큐엠_스마트스토어'
@@ -104,7 +105,7 @@ def warehouse_code(value):
     raise ValueError('출하창고는 100 본사창고 또는 300 위킵창고만 사용할 수 있습니다.')
 
 
-class Operations(TrackingOperations):
+class Operations(TrackingOperations, VoucherOperations):
     """All mutations are transactional. No GUI, network, or user session dependencies."""
 
     def __init__(self, folder, reference_dir):
@@ -369,7 +370,7 @@ class Operations(TrackingOperations):
         return encode([data['channel'], data['account'], data['product'], data['option']])
 
     def bundle_key(self, data):
-        return encode([data['channel'], data['account'], data['bundle'] or data['order_no']])
+        return encode([data.get('channel',''), data.get('account',''), data.get('bundle') or data.get('order_no','')])
 
     def duplicate_key(self, data):
         return tuple(identifier(data.get(key, '')) for key in ('channel','order_no','line_no','product','option','quantity','amount'))
@@ -1902,7 +1903,7 @@ class Operations(TrackingOperations):
             self._write_settings()
 
     def export_erp(self, on, through, path, from_day=None, include_esm=True, only_esm=False,
-                   excluded_channels=None):
+                   excluded_channels=None, preview=False):
         on, through = day(on), day(through)
         from_day = day(from_day) if from_day else '0001-01-01'
         if from_day > through:
@@ -1956,57 +1957,39 @@ class Operations(TrackingOperations):
             raise ValueError(f'상품 매칭이 필요한 옥션/지마켓 ERP 주문이 {len(esm_unmatched):,}건 있습니다.')
         rows = []
         def append(c, q, amount):
+            from .voucher import won
+            amount=won(amount)
+            if not c.get('code') or not c.get('customer'):
+                raise ValueError('전표 품목코드와 판매처 거래처코드를 확인하세요.')
             # Split integer won totals into two unit prices to retain exact totals.
             total = int(amount.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
             price, remainder = divmod(total, q)
             for count, unit in ((q-remainder,price),(remainder,price+1)):
                 if count:
                     supply = int((Decimal(unit*count)/Decimal('1.1')).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
-                    rows.append([None,None,c['customer'],None,self.settings['manager_code'],int(warehouse_code(c['warehouse'])),None,None,None,None,None,None,c['code'],None,None,count,unit,None,supply,unit*count-supply,None,None])
+                    rows.append([int(on.replace('-','')),None,c['customer'],None,self.settings['manager_code'],int(warehouse_code(c['warehouse'])),None,None,None,None,None,None,c['code'],c.get('name') or self.item_name(c['code']),None,count,unit,None,supply,unit*count-supply,None,None])
         with self.db:
             for shipment in pending:
                 order = orders[shipment['order_id']]
                 c = self._shipment_component(shipment,order)
                 append(c, shipment['qty'], number(shipment['erp_amount']))
-                self.db.execute('UPDATE shipments SET erp_id=? WHERE id=?', (batch,shipment['id']))
+                if not preview:self.db.execute('UPDATE shipments SET erp_id=? WHERE id=?', (batch,shipment['id']))
             for smart_row in smart_rows:
                 for component in json.loads(smart_row['components']):
                     append(component,quantity(component['quantity']),number(component['amount']))
-                self.db.execute('UPDATE smartstore_erp_rows SET erp_id=? WHERE id=?',(batch,smart_row['id']))
+                if not preview:self.db.execute('UPDATE smartstore_erp_rows SET erp_id=? WHERE id=?',(batch,smart_row['id']))
             for esm_row in esm_rows:
                 for component in json.loads(esm_row['components']):
                     append(component,quantity(component['quantity']),number(component['amount']))
-                self.db.execute('UPDATE esm_erp_rows SET erp_id=? WHERE id=?',(batch,esm_row['id']))
-            included_order_ids={shipment['order_id'] for shipment in pending}
-            included_bundles={self.bundle_key(orders[order_id]['data']) for order_id in included_order_ids}
-            groups = {}
-            for order in orders.values():
-                if is_excluded_channel(order['data'].get('channel'),excluded_channels):
-                    continue
-                bundle=self.bundle_key(order['data'])
-                if bundle in included_bundles:
-                    groups.setdefault(bundle,[]).append(order)
-            for bundle, group in groups.items():
-                if self.smartstore_erp_enabled() and any(is_smartstore_channel(order['data'].get('channel')) for order in group):
-                    continue
-                if any(o['state'] != '출고 완료' for o in group):
-                    continue
-                if any(self.db.execute('SELECT COUNT(*) FROM shipments s JOIN request_lines r ON s.line_id=r.id WHERE r.order_id=? AND s.erp_id IS NULL', (o['id'],)).fetchone()[0] for o in group):
-                    continue
-                if self.db.execute('SELECT 1 FROM fees WHERE bundle=?',(bundle,)).fetchone():
-                    continue
-                amounts = {number(o['data']['shipping']) for o in group}
-                if len(amounts) != 1:
-                    raise ValueError('동일 배송비 묶음의 금액이 서로 다릅니다. ERP 출력을 중단합니다.')
-                fee = amounts.pop()
-                if fee:
-                    base = group[0]['components'][0]
-                    append({**base,'code':'택배운송비','name':'배송비'},1,fee)
-                self.db.execute('INSERT INTO fees VALUES(?,?)',(bundle,batch))
+                if not preview:self.db.execute('UPDATE esm_erp_rows SET erp_id=? WHERE id=?',(batch,esm_row['id']))
+            fee_sources=[(orders[s['order_id']]['data'], self._shipment_component(s,orders[s['order_id']])) for s in pending]
+            fee_sources.extend((json.loads(r['data']),json.loads(r['components'])[0]) for r in [*smart_rows,*esm_rows])
+            self.append_voucher_fees(fee_sources,append,batch,preview=preview)
             rows=self._merge_erp_rows(rows)
             rows.sort(key=lambda row: (0 if row[5] == 100 else 1))
             headers = ['일자','순번','거래처코드','거래처명','담당자','출하창고','거래유형','통화','환율','계좌번호','미수금','특이사항','품목코드','품목명','규격','수량','단가','외화금액','공급가액','부가세','비고','생산전표생성']
             kind='ESM ERP' if only_esm else 'ERP'
+            if preview:return rows
             self._artifact(batch,kind,on,workbook_bytes(headers,rows,'이카운트 웹입력'),path)
             self.event(f'{kind} 파일 생성',batch)
         return batch
@@ -2119,7 +2102,7 @@ class Operations(TrackingOperations):
     def regenerate_erp(self, artifact_id, path):
         """Rebuild a previous ERP selection from current DB values without changing ERP state."""
         artifact=self.db.execute(
-            "SELECT id,kind FROM artifacts WHERE id=? AND kind IN ('ERP','ESM ERP')",(artifact_id,),
+            "SELECT id,kind,day FROM artifacts WHERE id=? AND kind IN ('ERP','ESM ERP')",(artifact_id,),
         ).fetchone()
         if not artifact:
             raise ValueError('ERP 파일 이력을 찾지 못했습니다.')
@@ -2145,9 +2128,9 @@ class Operations(TrackingOperations):
                 if count:
                     supply=int((Decimal(unit*count)/Decimal('1.1')).quantize(Decimal('1'),rounding=ROUND_HALF_UP))
                     rows.append([
-                        None,None,component['customer'],None,self.settings['manager_code'],
+                        int(artifact['day'].replace('-','')),None,component['customer'],None,self.settings['manager_code'],
                         int(warehouse_code(component['warehouse'])),None,None,None,None,None,None,
-                        component['code'],None,None,count,unit,None,supply,unit*count-supply,None,None,
+                        component['code'],component.get('name') or self.item_name(component['code']),None,count,unit,None,supply,unit*count-supply,None,None,
                     ])
 
         included_order_ids=set()
@@ -2164,23 +2147,9 @@ class Operations(TrackingOperations):
             for component in json.loads(esm_row['components']):
                 append(component,component['quantity'],component['amount'])
 
-        # Preserve which fee rows belonged to this artifact, but rebuild their values
-        # from the current order data.
-        fee_bundles={row['bundle'] for row in self.db.execute(
-            'SELECT bundle FROM fees WHERE erp_id=?',(artifact_id,),
-        )}
-        for bundle in fee_bundles:
-            group=[order for order in orders.values()
-                   if order['id'] in included_order_ids and self.bundle_key(order['data'])==bundle]
-            if not group:
-                continue
-            amounts={number(order['data']['shipping']) for order in group}
-            if len(amounts)!=1:
-                raise ValueError('동일 배송비 묶음의 현재 금액이 서로 다릅니다. ERP 재생성을 중단합니다.')
-            fee=amounts.pop()
-            if fee:
-                base=dict(group[0]['components'][0])
-                append({**base,'code':'택배운송비','name':'배송비'},1,fee)
+        fee_sources=[(orders[s['order_id']]['data'],self._shipment_component(s,orders[s['order_id']])) for s in shipments]
+        fee_sources.extend((json.loads(r['data']),json.loads(r['components'])[0]) for r in [*smart_rows,*esm_rows] if json.loads(r['components']))
+        self.append_voucher_fees(fee_sources,append,artifact_id,regenerate=True)
 
         rows.sort(key=lambda row:(0 if row[5]==100 else 1))
         headers=['일자','순번','거래처코드','거래처명','담당자','출하창고','거래유형','통화','환율','계좌번호','미수금','특이사항','품목코드','품목명','규격','수량','단가','외화금액','공급가액','부가세','비고','생산전표생성']

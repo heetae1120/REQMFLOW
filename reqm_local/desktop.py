@@ -360,6 +360,10 @@ class Desktop:
         self.table.bind('<Double-1>',self.open_mapping_from_click)
         result_tabs = ttk.Notebook(result_frame,style='Workspace.TNotebook')
         result_tabs.pack(fill='both',expand=True)
+        voucher_frame=ttk.Frame(result_tabs,padding=12)
+        result_tabs.add(voucher_frame,text='전표 작업표')
+        from .voucher_ui import VoucherPanel
+        self.voucher_panel=VoucherPanel(self,voucher_frame)
         result_input = ttk.Frame(result_tabs,padding=20)
         amount_frame = ttk.Frame(result_tabs,padding=20)
         esm_frame = ttk.Frame(result_tabs,padding=20)
@@ -473,7 +477,7 @@ class Desktop:
         ttk.Button(line,textvariable=self.erp_exclusion_text,command=lambda:self.safe(lambda:self.choose_channel_exclusions('erp'))).pack(side='left',padx=4)
         self.button(line,'ERP 파일 생성',self.erp,style='Accent.TButton')
         self.button(line,'현재 정보로 ERP 재다운로드',self.download_erp_again,style='Quiet.TButton')
-        ttk.Label(erp_card,text='이미 생성한 출고는 제외됩니다. 배송비는 묶음 전체 출고 완료 후 한 번 반영하며, 부가세 포함·10% 과세 기준입니다.',foreground='#64748B',wraplength=1000).pack(anchor='w',pady=(16,0))
+        ttk.Label(erp_card,text='이미 생성한 주문은 출력 이력에서 다시 내려받으세요. 배송비는 판매처·계정·주문번호별 첫 전표에 한 번 반영합니다. 부가세 포함·10% 과세 기준입니다.',foreground='#64748B',wraplength=1000).pack(anchor='w',pady=(16,0))
         self.history_day=tk.StringVar(value=date.today().isoformat())
         self.history_show_all=True
         history_filters=ttk.Frame(history_frame);history_filters.pack(fill='x',pady=(0,3))
@@ -1234,6 +1238,7 @@ class Desktop:
         self.refresh_orders()
 
     def refresh(self):
+        if hasattr(self,'voucher_panel'):self.voucher_panel.refresh()
         if hasattr(self,'tracking_panel'):self.tracking_panel.refresh()
         self.refresh_orders()
         self.refresh_erp_shipments()

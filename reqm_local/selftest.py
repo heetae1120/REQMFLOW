@@ -49,6 +49,9 @@ def run(folder):
         assert service.auto_import_shipments('2026-10-01') == (1,0)
         service.export_erp('2026-10-01','2026-10-01',folder/'demo-erp.xlsx')
         root=tk.Tk();root.withdraw();app=Desktop(root,service);root.update_idletasks()
+        assert service.voucher_family('[RQM]-QP2000C1-BK') == service.voucher_family('[RQM]-QP2000C1-WH')
+        assert service.voucher_family('[RQM]-QP2000C1-BK').startswith('model:')
+        assert tuple(app.voucher_panel.tree['columns']) == ('출고일','판매처','품목코드','품목명','수량','상품금액','상태')
         assert root.title().startswith('REQM FLOW')
         assert app.cloud_status.get() == '로컬 DB 저장'
         assert [app.workspace_tabs.tab(tab,'text') for tab in app.workspace_tabs.tabs()] == ['주문 · 출고요청','실제출고','출력 이력','설정 · 백업']

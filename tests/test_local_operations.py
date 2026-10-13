@@ -419,11 +419,11 @@ class LocalTests(unittest.TestCase):
         warehouses=[row[5] for row in rows]
         self.assertEqual(set(warehouses),{100,300})
         self.assertEqual(warehouses,sorted(warehouses))
-        allowed={2,4,5,12,15,16,18,19}
+        allowed={0,2,4,5,12,13,15,16,18,19}
         for row in rows:
             self.assertEqual({index for index,value in enumerate(row) if value not in (None,'')},allowed)
-            self.assertIsNone(row[0])
-            self.assertIsNone(row[13])
+            self.assertEqual(row[0],20261005)
+            self.assertTrue(row[13])
 
     def test_mapping_rejects_unknown_warehouse(self):
         _,order=self.import_order()
@@ -797,7 +797,7 @@ class LocalTests(unittest.TestCase):
         self.s.export_erp('2026-10-06','2026-10-06',target)
         book=load_workbook(target,data_only=True)
         rows=list(book.active.values)[1:]
-        self.assertEqual(sum(row[15]*row[16] for row in rows),20000)
+        self.assertEqual(sum(row[15]*row[16] for row in rows),23000)
         book.close()
 
     def test_esm_fixed_columns_split_marketplace_and_calculate_unit_amount(self):
@@ -1230,11 +1230,11 @@ class LocalTests(unittest.TestCase):
         self.s.close();self.s=Operations(self.folder/'data',REFERENCE)
         self.assertEqual(self.s.orders()[0]['state'],'출고 요청')
 
-    def test_shared_shipping_fee_only_when_bundle_complete(self):
+    def test_shared_shipping_fee_on_first_order_export_only(self):
         _,first=self.import_order(line='A1');_,second=self.import_order(line='A2')
         one=self.request(first);two=self.request(second)
         self.result(one,3);self.s.export_erp('2026-10-01','2026-10-01',self.folder/'first.xlsx')
-        self.assertEqual(self.s.db.execute('SELECT COUNT(*) FROM fees').fetchone()[0],0)
+        self.assertEqual(self.s.db.execute('SELECT COUNT(*) FROM fees').fetchone()[0],1)
         self.result(two,3);self.s.export_erp('2026-10-01','2026-10-01',self.folder/'second.xlsx')
         self.assertEqual(self.s.db.execute('SELECT COUNT(*) FROM fees').fetchone()[0],1)
 
