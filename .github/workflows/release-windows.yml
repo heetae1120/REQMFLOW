@@ -60,12 +60,32 @@ jobs:
         shell: pwsh
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           Copy-Item dist/REQM_FLOW.exe REQM_FLOW.exe
           $hash = (Get-FileHash REQM_FLOW.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText("$pwd/REQM_FLOW.exe.sha256", "$hash  REQM_FLOW.exe" + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
           $manifest = @{version=$env:RELEASE_VERSION; file="https://github.com/heetae1120/REQMFLOW/releases/download/v$env:RELEASE_VERSION/REQM_FLOW.exe"; sha256=$hash} | ConvertTo-Json
           [IO.File]::WriteAllText("$pwd/latest.json", $manifest, [Text.UTF8Encoding]::new($false))
+          $releaseTag = "v$env:RELEASE_VERSION"
+          $releaseExists = $false
+          gh release download $releaseTag --pattern latest.json --dir release-reference
+          if ($LASTEXITCODE -eq 0) {
+            $releaseExists = $true
+            gh release download $releaseTag --pattern REQM_FLOW.exe --dir release-reference
+            if ($LASTEXITCODE -ne 0) { throw 'Could not download the already-published executable' }
+            $published = Get-Content release-reference/latest.json -Raw | ConvertFrom-Json
+            $publishedHash = (Get-FileHash release-reference/REQM_FLOW.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($published.version -ne $env:RELEASE_VERSION -or $published.sha256 -ne $publishedHash) { throw 'Existing release executable does not match its manifest' }
+            Copy-Item release-reference/REQM_FLOW.exe REQM_FLOW.exe -Force
+            $hash = $publishedHash
+            [IO.File]::WriteAllText("$pwd/REQM_FLOW.exe.sha256", "$hash  REQM_FLOW.exe" + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText("$pwd/latest.json", (Get-Content release-reference/latest.json -Raw), [Text.UTF8Encoding]::new($false))
+          }
+          Compress-Archive -Path "$pwd/REQM_FLOW.exe" -DestinationPath "$pwd/REQM_FLOW_windows.zip" -CompressionLevel Optimal
+          $zipHash = (Get-FileHash REQM_FLOW_windows.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText("$pwd/REQM_FLOW_windows.zip.sha256", "$zipHash  REQM_FLOW_windows.zip" + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+          "release_exists=$($releaseExists.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
       - uses: actions/upload-artifact@v4
         with:
           name: REQM-FLOW-v${{ steps.release.outputs.version }}
@@ -73,10 +93,23 @@ jobs:
             REQM_FLOW.exe
             REQM_FLOW.exe.sha256
             latest.json
+            REQM_FLOW_windows.zip
+            REQM_FLOW_windows.zip.sha256
           retention-days: 14
       - name: Publish verified release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
-        run: gh release create "v$env:RELEASE_VERSION" REQM_FLOW.exe REQM_FLOW.exe.sha256 latest.json --title "REQM FLOW $env:RELEASE_VERSION" --notes-file "RELEASE_NOTES_$env:RELEASE_VERSION.md" --target "${{ github.sha }}"
+          RELEASE_EXISTS: ${{ steps.release.outputs.release_exists }}
+        run: |
+          $tag = "v$env:RELEASE_VERSION"
+          if ($env:RELEASE_EXISTS -eq 'true') {
+            $existing = gh release view $tag --json assets | ConvertFrom-Json
+            if (($existing.assets.name -contains 'REQM_FLOW_windows.zip') -or ($existing.assets.name -contains 'REQM_FLOW_windows.zip.sha256')) {
+              throw 'Compatibility archive assets already exist; refusing to overwrite release assets.'
+            }
+            gh release upload $tag REQM_FLOW_windows.zip REQM_FLOW_windows.zip.sha256
+          } else {
+            gh release create $tag REQM_FLOW.exe REQM_FLOW.exe.sha256 latest.json REQM_FLOW_windows.zip REQM_FLOW_windows.zip.sha256 --title "REQM FLOW $env:RELEASE_VERSION" --notes-file "RELEASE_NOTES_$env:RELEASE_VERSION.md" --target "${{ github.sha }}"
+          }
