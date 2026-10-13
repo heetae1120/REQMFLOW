@@ -173,8 +173,11 @@ class Operations(TrackingOperations, VoucherOperations):
         if 'amount_split_confirmed' not in smartstore_columns:
             self.db.execute("ALTER TABLE smartstore_erp_rows ADD COLUMN amount_split_confirmed INTEGER NOT NULL DEFAULT 0")
         self.seed_item_names()
+        self.confirm_existing_smartstore_matches()
+        self.remember_confirmed_smartstore_splits()
         self.backfill_legacy_smartstore_matches()
         self.confirm_existing_smartstore_matches()
+        self.remember_confirmed_smartstore_splits()
         self.db.commit()
         self.ensure_local_transition_backup()
 
@@ -264,7 +267,7 @@ class Operations(TrackingOperations, VoucherOperations):
                 data=json.loads(row['data'])
             except (TypeError,json.JSONDecodeError):
                 continue
-            components,issue=self._erp_source_components(data)
+            components,issue=self._smartstore_erp_components(data)
             if not components or issue:
                 continue
             confirmed=int(self._smartstore_amounts_match(data,components,issue))
@@ -1366,7 +1369,118 @@ class Operations(TrackingOperations, VoucherOperations):
         # REQM-Sales composition and amount rules are bundled in the FLOW
         # reference catalog.  SmartStore used to bypass them and only inspect
         # manually saved FLOW mappings, leaving otherwise known products empty.
-        return self._erp_source_components(lookup)
+        components,issue=self._erp_source_components(lookup)
+        if components:
+            return components,issue
+        colour_components,colour_issue=self._colour_variant_components(lookup)
+        return (colour_components,colour_issue) if colour_components else (components,issue)
+
+    @staticmethod
+    def _option_value(text,label):
+        match=re.search(rf'{re.escape(label)}\s*:\s*([^/]+)',identifier(text),re.IGNORECASE)
+        return identifier(match.group(1)) if match else ''
+
+    @staticmethod
+    def _clean_colour(value):
+        return re.sub(r'(?i)\(?\s*new\s*\)?','',identifier(value)).strip(' ()')
+
+    def _active_item_candidates(self, terms, *, exclude=()):
+        required=[normalize_source(term) for term in terms if identifier(term)]
+        blocked=[normalize_source(term) for term in exclude if identifier(term)]
+        result=[]
+        for code,name in self.active_shipping_items.items():
+            target=normalize_source(name)
+            if all(term in target for term in required) and not any(term in target for term in blocked):
+                result.append(code)
+        return result
+
+    def _family_price_amounts(self, data, components):
+        """Reuse one unambiguous confirmed allocation for the same model families."""
+        source_count=Decimal(quantity(data.get('quantity') or '1'))
+        target=[]
+        for component in components:
+            family=self.voucher_family(component['code'])
+            target.append((family,str((Decimal(component['quantity'])/source_count).normalize())))
+        if len({family for family,_ in target})!=len(target):
+            return None
+        target=tuple(sorted(target))
+        unit_total=number(data.get('amount') or '0')/source_count
+        catalog_channel=self.catalog_channel(data['channel'])
+        from .shipping import channel_key
+        allocations={}
+        seen=set()
+        for (source_channel,_),templates in self.catalog.price_templates.items():
+            if channel_key(source_channel)!=channel_key(catalog_channel):
+                continue
+            for template in templates:
+                rule_key=template.get('price_rule_key')
+                if rule_key in seen or template.get('review_status')!='confirmed' or template['total_unit_price']!=unit_total:
+                    continue
+                seen.add(rule_key)
+                parts=[];amounts={}
+                for source in template.get('components',[]):
+                    code=identifier(source.get('item_code'))
+                    family=self.voucher_family(code)
+                    count=number(source.get('quantity') or '1')
+                    parts.append((family,str(count.normalize())))
+                    amounts[family]=str(number(source.get('allocated_unit_price') or '0')*count)
+                if len(amounts)==len(parts) and tuple(sorted(parts))==target:
+                    allocations[encode(amounts)]=amounts
+        if len(allocations)!=1:
+            return None
+        values=next(iter(allocations.values()))
+        return [str(number(values[self.voucher_family(component['code'])])*source_count) for component in components]
+
+    def _colour_variant_components(self,data):
+        """Resolve current SmartStore QP set wording by model, shape and exact colour SKU."""
+        text=' '.join((identifier(data.get('product')),identifier(data.get('option'))))
+        model=next((value for value in ('QP1000C','QP2000C') if value.lower() in text.lower()),'')
+        if not model:
+            return [],'색상 세트 자동 매칭 대상이 아닙니다.'
+        option=identifier(data.get('option'))
+        main_colour=self._clean_colour(self._option_value(option,'보조배터리 색상'))
+        set_type=self._option_value(option,'세트/단품')
+        selection=self._option_value(option,'추가구성 선택')
+        if not main_colour or not set_type:
+            return [],'보조배터리 색상 또는 세트 종류를 확인하세요.'
+        main=self._active_item_candidates((model,main_colour),exclude=('실리콘케이스',))
+        if len(main)!=1:
+            return [],f'{model} {main_colour} 활성 품목을 하나로 결정할 수 없습니다.'
+        candidate_sets=[]
+        if '단품' in set_type and '세트' not in set_type:
+            candidate_sets=[[main[0]]]
+        elif '케이스세트' in set_type:
+            style=next((value for value in ('야광핸디형','핸디형','기본형') if value in selection or value in set_type),'')
+            case_colour=self._clean_colour(selection.split('(')[0])
+            cases=self._active_item_candidates((model,'실리콘케이스',style,case_colour))
+            candidate_sets=[[main[0],code] for code in cases]
+        elif '케이블세트' in set_type:
+            cable_colour=self._clean_colour(selection.split('(')[0])
+            cables=self._active_item_candidates(('크레용케이블',cable_colour))
+            candidate_sets=[[main[0],code] for code in cables]
+        if not candidate_sets:
+            return [],'같은 구성의 활성 색상 품목을 찾지 못했습니다.'
+        customer=self.channel_customer_code(data['channel'])
+        source_quantity=quantity(data.get('quantity') or '1')
+        resolved=[]
+        for codes in candidate_sets:
+            components=[{
+                'code':code,'logistics_code':code,'name':self.item_name(code),
+                'quantity':source_quantity,'source_quantity':source_quantity,'amount':'0',
+                'warehouse':self.settings['warehouse'],'customer':customer,
+                'match_method':'동일 세트 색상·주문금액 자동 매칭',
+            } for code in codes]
+            if len(components)==1:
+                amounts=[str(number(data.get('amount') or '0'))]
+            else:
+                row={'full':True,'components':components,'issue':'','data':data,'channel':data['channel']}
+                amounts=self.voucher_suggestion(row) or self._family_price_amounts(data,components)
+            if amounts:
+                resolved.append([{**component,'amount':amount} for component,amount in zip(components,amounts)])
+        signatures={encode([(item['code'],item['amount']) for item in value]):value for value in resolved}
+        if len(signatures)!=1:
+            return [],'동일 세트의 색상·금액 규칙이 없거나 둘 이상이라 자동 확정할 수 없습니다.'
+        return self.active_components(next(iter(signatures.values())))
 
     @staticmethod
     def _smartstore_rows_match(left, right):

@@ -105,6 +105,27 @@
     "VAUX-QCL100-샌드": "QCL100",
     "VAUX-QCL100-화이트": "QCL100",
     "VAUX-QTF200-GR": "QTF200",
-    "VAUX-QTF200-WH": "QTF200"
+    "VAUX-QTF200-WH": "QTF200",
+    "QP1000C1-Carrot": "QP1000C",
+    "QP1000C1-CobaltBlue": "QP1000C",
+    "QP1000C1-NeonGreen": "QP1000C",
+    "QP2000C_SageMint": "QP2000C",
+    "QP2000C_TomatoRed": "QP2000C",
+    "CASE-QP1000A-Ebony": "QP1000C 실리콘케이스 기본형",
+    "CASE-QP1000A-Sand": "QP1000C 실리콘케이스 기본형",
+    "CASE-QP1000C-Hand-Cl": "QP1000C 실리콘케이스 핸디형",
+    "CASE-QP1000C-Hand-Eb": "QP1000C 실리콘케이스 핸디형",
+    "CASE-QP1000C-Hand-Sa": "QP1000C 실리콘케이스 핸디형",
+    "CASE-QP2000C-Cloud": "QP2000C 실리콘케이스 기본형",
+    "CASE-QP2000C-Ebony": "QP2000C 실리콘케이스 기본형",
+    "CASE-QP2000C-Sand": "QP2000C 실리콘케이스 기본형",
+    "CASE-QP2000C_Hand_CL": "QP2000C 실리콘케이스 핸디형",
+    "CASE-QP2000C_Hand_Sa": "QP2000C 실리콘케이스 핸디형",
+    "QCB-CC30S_Carrot": "30cm 크레용케이블",
+    "QCB-CC30S_CobaltBlue": "30cm 크레용케이블",
+    "QCB-CC30S_NeonGreen": "30cm 크레용케이블",
+    "QCB-CC60S_Carrot": "60cm 크레용케이블",
+    "QCB-CC60S_CobaltBlue": "60cm 크레용케이블",
+    "QCB-CC60S_NeonGreen": "60cm 크레용케이블"
   }
 }

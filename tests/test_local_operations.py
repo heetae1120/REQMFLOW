@@ -106,6 +106,32 @@ class LocalTests(unittest.TestCase):
             "SELECT COUNT(*) FROM mappings WHERE key LIKE 'voucher:v1:%'"
         ).fetchone()[0],0)
 
+    def test_same_qp_case_set_uses_exact_colour_skus_and_shared_amounts(self):
+        data={
+            'channel':'리큐엠_스마트스토어','account':'기본','order_no':'COLOUR-SET',
+            'product':'리큐엠 20000mAh 잔량표시 고속충전 대용량 보조배터리 QP2000C 단품',
+            'option':'세트/단품: 케이스세트 / 보조배터리 색상: 화이트 / 추가구성 선택: 핑크(기본형)',
+            'quantity':'1','amount':'44400','shipping':'0',
+        }
+        components,issue=self.s._smartstore_erp_components(data)
+        self.assertEqual(issue,'')
+        self.assertEqual({item['code']:Decimal(item['amount']) for item in components},{
+            '[RQM]-QP2000C1-WH':Decimal('36900'),
+            'CASE-QP2000C-PINK':Decimal('7500'),
+        })
+        self.assertTrue(all(item['match_method']=='동일 세트 색상·주문금액 자동 매칭' for item in components))
+
+    def test_colour_set_stays_unmatched_when_accessory_model_is_ambiguous(self):
+        data={
+            'channel':'리큐엠_스마트스토어','account':'기본','order_no':'AMBIGUOUS-CABLE',
+            'product':'리큐엠 20000mAh 잔량표시 고속충전 대용량 보조배터리 QP2000C 단품',
+            'option':'세트/단품: 케이블세트 / 보조배터리 색상: 블랙 / 추가구성 선택: 캐롯',
+            'quantity':'1','amount':'42800','shipping':'0',
+        }
+        components,issue=self.s._smartstore_erp_components(data)
+        self.assertEqual(components,[])
+        self.assertIn('상품/옵션 조합',issue)
+
     def test_tree_sort_values_handle_numbers_and_text(self):
         self.assertLess(tree_sort_value('2'),tree_sort_value('10'))
         self.assertEqual(tree_sort_value('상품 A'),tree_sort_value('상품 a'))

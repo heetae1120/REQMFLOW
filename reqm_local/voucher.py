@@ -34,6 +34,10 @@ class VoucherOperations:
                 path=Path(self.reference_dir)/'voucher_families.json'
                 self._voucher_family_defaults=json.loads(path.read_text(encoding='utf-8'))['families'] if path.exists() else {}
             family=self._voucher_family_defaults.get(code,'')
+        # Older entries used a visual trailing dash in some family labels.
+        # It is not part of the model identity and prevented equivalent colours
+        # from sharing the same allocation.
+        family=family.rstrip(' -')
         return 'model:' + family if family else 'sku:' + code
 
     def set_voucher_family(self, code, family):
