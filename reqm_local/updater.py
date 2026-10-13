@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -103,11 +104,12 @@ def prepare_update(release):
     return source
 
 
-def launch_replacer(source, install_dir, process_id):
+def launch_replacer(source, install_dir, process_id, *, restart_test_folder=None):
     source,install_dir = Path(source).resolve(),Path(install_dir).resolve()
     script = source.parent/'apply-update.ps1'
-    script.write_text(r'''param([string]$Source,[string]$Target,[int]$ProcessId)
+    script.write_text(r'''param([string]$Source,[string]$Target,[int]$ProcessId,[string]$RestartTestFolder='')
 $ErrorActionPreference = 'Stop'
+$env:PYINSTALLER_RESET_ENVIRONMENT = '1'
 for($i=0; $i -lt 120; $i++) {
   if(-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { break }
   Start-Sleep -Milliseconds 250
@@ -122,20 +124,34 @@ if(Test-Path -LiteralPath ${backupExe}) { Remove-Item -LiteralPath ${backupExe} 
 if(Test-Path -LiteralPath ${targetExe}) { Move-Item -LiteralPath ${targetExe} -Destination ${backupExe} -Force }
 try {
   Copy-Item -LiteralPath ${newExe} -Destination ${targetExe} -Force
-  Start-Process -FilePath ${targetExe} -WorkingDirectory $Target
+  if($RestartTestFolder) {
+    Start-Process -FilePath ${targetExe} -WorkingDirectory $Target -ArgumentList @('--self-test', ('"' + $RestartTestFolder + '"')) -WindowStyle Hidden
+  } else {
+    Start-Process -FilePath ${targetExe} -WorkingDirectory $Target -WindowStyle Hidden
+  }
 } catch {
   if(Test-Path -LiteralPath ${targetExe}) { Remove-Item -LiteralPath ${targetExe} -Force }
   if(Test-Path -LiteralPath ${backupExe}) { Move-Item -LiteralPath ${backupExe} -Destination ${targetExe} -Force }
-  if(Test-Path -LiteralPath ${targetExe}) { Start-Process -FilePath ${targetExe} -WorkingDirectory $Target }
+  if(Test-Path -LiteralPath ${targetExe}) { Start-Process -FilePath ${targetExe} -WorkingDirectory $Target -WindowStyle Hidden }
   exit 4
 }
-Remove-Item -LiteralPath $PSScriptRoot -Recurse -Force
+$stagePath = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
+$tempPath = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+if($stagePath.StartsWith($tempPath,[StringComparison]::OrdinalIgnoreCase) -and
+   (Split-Path -Leaf $stagePath).StartsWith('REQM-FLOW-update-') -and
+   [IO.Path]::GetFullPath((Split-Path -Parent $Source)).TrimEnd('\') -eq $stagePath) {
+  Remove-Item -LiteralPath $stagePath -Recurse -Force
+}
 ''',encoding='utf-8-sig')
     flags = getattr(subprocess,'CREATE_NO_WINDOW',0)
-    subprocess.Popen([
+    command=[
         'powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(script),
         '-Source',str(source),'-Target',str(install_dir),'-ProcessId',str(process_id),
-    ],creationflags=flags,close_fds=True,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    ]
+    if restart_test_folder is not None:
+        command.extend(['-RestartTestFolder',str(Path(restart_test_folder).resolve())])
+    subprocess.Popen(command,env={**os.environ,'PYINSTALLER_RESET_ENVIRONMENT':'1'},
+        creationflags=flags,close_fds=True,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 
 
 def install_directory():

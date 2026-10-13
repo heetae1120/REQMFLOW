@@ -1,9 +1,22 @@
 import unittest
+import tempfile
+import os
+from pathlib import Path
 from unittest.mock import patch
-from reqm_local.updater import GITHUB_LATEST_URL,latest_release
+from reqm_local.updater import GITHUB_LATEST_URL,latest_release,launch_replacer
 
 
 class UpdateChannelTests(unittest.TestCase):
+    def test_replacer_starts_with_fresh_pyinstaller_environment(self):
+        with tempfile.TemporaryDirectory(prefix='REQM-FLOW-update-') as folder:
+            source=Path(folder)/'REQM_FLOW';source.mkdir()
+            with patch.dict(os.environ,{'_PYI_APPLICATION_HOME_DIR':'deleted-runtime'}),patch('reqm_local.updater.subprocess.Popen') as popen:
+                launch_replacer(source,Path(folder)/'install',123,restart_test_folder=Path(folder)/'report')
+            self.assertEqual(popen.call_args.kwargs['env']['PYINSTALLER_RESET_ENVIRONMENT'],'1')
+            script=(Path(folder)/'apply-update.ps1').read_text(encoding='utf-8-sig')
+            self.assertIn("$env:PYINSTALLER_RESET_ENVIRONMENT = '1'",script)
+            self.assertIn('-RestartTestFolder',popen.call_args.args[0])
+
     def test_official_github_release_is_preferred_and_hash_is_returned(self):
         url='https://github.com/heetae1120/REQMFLOW/releases/download/v1.9.31/REQM_FLOW.exe'
         release={'tag_name':'v1.9.31','assets':[{'name':'REQM_FLOW.exe',

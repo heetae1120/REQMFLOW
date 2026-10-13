@@ -25,6 +25,10 @@ with tempfile.TemporaryDirectory(dir=root/'outputs') as folder:
         window.update_idletasks()
         assert '검토 필요' in app.summary.get()
         assert len(app.table.get_children())==0
+        assert [app.workspace_tabs.tab(tab,'text') for tab in app.workspace_tabs.tabs()] == ['주문 · 출고요청','실제출고','출력 이력','설정 · 백업']
+        assert [app.settings_tabs.tab(tab,'text') for tab in app.settings_tabs.tabs()] == ['설정 · 백업','매칭 설정','주문 수집']
+        assert app.workspace_tabs.select() == str(app.order_frame)
+
         assert tuple(app.mapping_vars) == MAPPING_FIELD_ORDER
         assert [FIELD_LABELS[field] for field in app.mapping_vars] == [
             '주문일자', '판매처주문번호', '상품주문번호', '상품명', '옵션', '수량', '금액', '배송비',

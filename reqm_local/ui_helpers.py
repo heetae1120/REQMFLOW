@@ -85,19 +85,23 @@ def bind_wide_combobox(widget) -> None:
     if getattr(widget,'_reqm_search_bound',False):
         return
     widget._reqm_search_bound=True
+    _register_popup_guards(widget)
 
     def show_current(*_):
         post_combobox(widget,widget.cget('values'))
 
     def button_press(event):
+        widget._reqm_popup_suppressed=False
         widen_combobox_dropdown(widget)
         element=widget.identify(event.x,event.y)
         if 'arrow' in str(element).casefold():
             widget.focus_force()
             widget.after_idle(show_current)
             return 'break'
+        widget.after_idle(show_current)
 
     def move(delta):
+        widget._reqm_popup_suppressed=False
         popup=getattr(widget,'_reqm_popup',None)
         if not popup or not popup.winfo_viewable():
             show_current();return 'break'
@@ -110,13 +114,14 @@ def bind_wide_combobox(widget) -> None:
         return 'break'
 
     def choose_active(_event=None):
+        if not _popup_eligible(widget):return 'break'
         popup=getattr(widget,'_reqm_popup',None)
         if not popup or not popup.winfo_viewable():return
         selected=widget._reqm_popup_list.curselection()
         if not selected:return
         value=widget._reqm_popup_list.get(selected[0])
         widget.set(value);widget.icursor('end')
-        popup.withdraw();widget.focus_force()
+        _hide_combobox_popup(widget);widget.focus_set()
         widget.event_generate('<<ComboboxSelected>>')
         return 'break'
 
@@ -131,26 +136,76 @@ def bind_wide_combobox(widget) -> None:
         widget.after(120,hide)
 
     widget.bind('<ButtonPress-1>',button_press,add='+')
-    widget.bind('<FocusIn>',show_current,add='+')
+    widget.bind('<KeyPress>',lambda _event:setattr(widget,'_reqm_popup_suppressed',False),add='+')
     widget.bind('<FocusOut>',hide_later,add='+')
     widget.bind('<Down>',lambda _event:move(1),add='+')
     widget.bind('<Up>',lambda _event:move(-1),add='+')
     widget.bind('<Return>',choose_active,add='+')
     widget.bind('<Escape>',lambda _event:_hide_combobox_popup(widget),add='+')
-    widget.bind('<Alt-Down>',lambda _event:(show_current(),'break')[1],add='+')
+    widget.bind('<Alt-Down>',lambda _event:move(1),add='+')
+
+
+def _popup_eligible(widget):
+    try:
+        if not widget.winfo_viewable() or widget.instate(['disabled']):return False
+        grab=widget.grab_current()
+        return grab is None or grab.winfo_toplevel()==widget.winfo_toplevel()
+    except tk.TclError:
+        return False
+
+
+def hide_combobox_popups(root):
+    owner=getattr(root,'_reqm_popup_owner',None)
+    if owner is not None:_hide_combobox_popup(owner)
+
+
+def _register_popup_guards(widget):
+    root=widget._root()
+    if getattr(root,'_reqm_popup_guards_bound',False):return
+    root._reqm_popup_guards_bound=True
+    def within(child,parent):
+        return str(child)==str(parent) or str(child).startswith(str(parent)+'.')
+    def dismiss(event):
+        owner=getattr(root,'_reqm_popup_owner',None)
+        if owner is None:return
+        popup=getattr(owner,'_reqm_popup',None)
+        if not _popup_eligible(owner) or not (within(event.widget,owner) or (popup and within(event.widget,popup))):
+            _hide_combobox_popup(owner)
+    def changed(event):
+        owner=getattr(root,'_reqm_popup_owner',None)
+        if owner is not None and (not _popup_eligible(owner) or within(owner,event.widget)):
+            _hide_combobox_popup(owner)
+    root.bind_all('<ButtonPress-1>',dismiss,add='+')
+    root.bind_all('<FocusIn>',dismiss,add='+')
+    root.bind_all('<<NotebookTabChanged>>',lambda _event:hide_combobox_popups(root),add='+')
+    root.bind_all('<Unmap>',changed,add='+')
+    root.bind_all('<Destroy>',changed,add='+')
+    def mapped(event):
+        owner=getattr(root,'_reqm_popup_owner',None)
+        if owner is not None and isinstance(event.widget,tk.Toplevel) and event.widget!=getattr(owner,'_reqm_popup',None):
+            _hide_combobox_popup(owner)
+    root.bind_all('<Map>',mapped,add='+')
+    root.bind_all('<Configure>',lambda event:hide_combobox_popups(root) if event.widget==root else None,add='+')
 
 
 def post_combobox(widget, values, delay: int = 0) -> None:
     """Update and show related choices without moving focus from the text field."""
     values=list(values)
+    _register_popup_guards(widget)
     widget.configure(values=values)
-    widen_combobox_dropdown(widget,values)
+    if not _popup_eligible(widget) or getattr(widget,'_reqm_popup_suppressed',False):
+        _hide_combobox_popup(widget)
+        return
     if not values:
         _hide_combobox_popup(widget)
         return
     try:focused=str(widget.tk.call('focus')) == str(widget)
     except Exception:focused=False
     if not focused:return
+    root=widget._root()
+    previous=getattr(root,'_reqm_popup_owner',None)
+    if previous is not None and previous!=widget:_hide_combobox_popup(previous)
+    root._reqm_popup_owner=widget
     popup=getattr(widget,'_reqm_popup',None)
     if not popup or not popup.winfo_exists():
         popup=tk.Toplevel(widget.winfo_toplevel())
@@ -166,18 +221,21 @@ def post_combobox(widget, values, delay: int = 0) -> None:
         listbox.pack(side='left',fill='both',expand=True);scrollbar.pack(side='right',fill='y')
         widget._reqm_popup=popup;widget._reqm_popup_list=listbox
         def choose(event):
+            if not _popup_eligible(widget) or not popup.winfo_viewable() or getattr(root,'_reqm_popup_owner',None)!=widget:
+                _hide_combobox_popup(widget);return 'break'
             index=listbox.nearest(event.y)
-            if index < 0:return
+            if not 0 <= index < listbox.size():return
             value=listbox.get(index)
             widget.set(value);widget.icursor('end')
-            popup.withdraw();widget.focus_force()
+            _hide_combobox_popup(widget);widget.focus_set()
             widget.event_generate('<<ComboboxSelected>>')
         listbox.bind('<ButtonRelease-1>',choose)
         listbox.bind('<Return>',lambda _event:choose(type('Event',(),{'y':listbox.bbox('active')[1] if listbox.bbox('active') else 0})()))
         widget.bind('<Destroy>',lambda _event:popup.destroy() if popup.winfo_exists() else None,add='+')
     listbox=widget._reqm_popup_list
-    listbox.delete(0,'end')
-    for value in values:listbox.insert('end',value)
+    if getattr(widget,'_reqm_popup_values',None)!=values:
+        listbox.delete(0,'end')
+        listbox.insert('end',*values)
     widget._reqm_popup_values=values
     font=tkfont.nametofont('TkDefaultFont')
     width=max(widget.winfo_width(),min(960,max((font.measure(str(value)) for value in values),default=0)+48))
@@ -188,13 +246,17 @@ def post_combobox(widget, values, delay: int = 0) -> None:
     if y+height>screen_height-8:y=max(0,widget.winfo_rooty()-height)
     popup.geometry(f'{width}x{height}+{x}+{y}')
     popup.deiconify();popup.lift()
-    try:popup.attributes('-topmost',True)
-    except tk.TclError:pass
 
 
 def _hide_combobox_popup(widget):
+    widget._reqm_popup_suppressed=True
     popup=getattr(widget,'_reqm_popup',None)
-    if popup and popup.winfo_exists():popup.withdraw()
+    try:
+        if popup and popup.winfo_exists():popup.withdraw()
+    except tk.TclError:
+        pass
+    root=widget._root()
+    if getattr(root,'_reqm_popup_owner',None)==widget:root._reqm_popup_owner=None
     return 'break'
 
 

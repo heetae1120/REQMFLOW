@@ -24,7 +24,7 @@ from .files import (
 from .service import Operations
 from .ui_helpers import (
     autosize_tree, bind_desktop_drag, bind_tree_sorting, bind_tree_column_resize, bind_wide_combobox, filter_combobox_choices,
-    post_combobox, search_suggestions,
+    post_combobox, search_suggestions, hide_combobox_popups,
 )
 from .profiles import (
     PROFILE_PRESETS, SALES_CHANNELS, MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING,
@@ -35,7 +35,7 @@ from .shipping import compact
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.31'
+APP_VERSION = '1.9.32'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -214,18 +214,23 @@ class Desktop:
         self.request_exclusion_text=tk.StringVar(value=self.exclusion_label(self.request_excluded_channels))
         self.erp_exclusion_text=tk.StringVar(value=self.exclusion_label(self.erp_excluded_channels))
         self.request_warehouse=tk.StringVar(value='전체창고')
-        matching_frame = ttk.Frame(tabs,padding=18)
+        self.workspace_tabs = tabs
         self.order_frame = ttk.Frame(tabs,padding=12)
         result_frame = ttk.Frame(tabs,padding=16)
         history_frame = ttk.Frame(tabs,padding=12)
-        settings_frame = ttk.Frame(tabs,padding=16)
-        login_frame = ttk.Frame(tabs,padding=16)
-        for frame,title in [(matching_frame,'★  매칭 설정'),(self.order_frame,'1  주문 · 출고요청'),(result_frame,'2  실제 출고 · ERP'),(history_frame,'3  출력 이력'),(settings_frame,'4  설정 · 백업')]:
+        settings_page = ttk.Frame(tabs,padding=8)
+        for frame,title in [(self.order_frame,'주문 · 출고요청'),(result_frame,'실제출고'),(history_frame,'출력 이력'),(settings_page,'설정 · 백업')]:
             tabs.add(frame,text=title)
-        tabs.add(login_frame,text='5  주문 수집')
+        self.settings_tabs = ttk.Notebook(settings_page,style='Workspace.TNotebook')
+        self.settings_tabs.pack(fill='both',expand=True)
+        settings_frame = ttk.Frame(self.settings_tabs,padding=16)
+        matching_frame = self.matching_frame = ttk.Frame(self.settings_tabs,padding=18)
+        login_frame = ttk.Frame(self.settings_tabs,padding=16)
+        for frame,title in [(settings_frame,'설정 · 백업'),(matching_frame,'매칭 설정'),(login_frame,'주문 수집')]:
+            self.settings_tabs.add(frame,text=title)
         from .closed_mall_ui import ClosedMallPanel
-        self.closed_mall_panel = ClosedMallPanel(login_frame, self.root)
-        nav_items = [('✦  매칭 설정',0),('▣  주문 · 출고요청',1),('↗  실제 출고 · ERP',2),('◫  출력 이력',3),('⚙  설정 · 백업',4),('◉  주문 수집',5)]
+        self.closed_mall_panel = ClosedMallPanel(login_frame,self.root)
+        nav_items = [('▣  주문 · 출고요청',0),('↗  실제출고',1),('◫  출력 이력',2),('⚙  설정 · 백업',3)]
         self.nav_buttons = []
         def select_page(index):
             tabs.select(index)

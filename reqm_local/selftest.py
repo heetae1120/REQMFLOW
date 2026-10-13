@@ -2,11 +2,31 @@
 import json
 import os
 import sys
+import shutil
+import tempfile
 from pathlib import Path
 import tkinter as tk
 from .files import reference_data_path, workbook_bytes
 from .service import Operations
 from .desktop import Desktop, APP_VERSION
+
+
+def run_restart(folder):
+    """Restart the same onefile executable through the real update replacer."""
+    from .updater import launch_replacer
+    folder=Path(folder).resolve()
+    executable=Path(sys.executable).resolve()
+    if not getattr(sys,'frozen',False) or executable.parent != folder/'install':
+        raise ValueError('재시작 검증은 별도 테스트 설치 폴더에서만 실행할 수 있습니다.')
+    folder.mkdir(parents=True,exist_ok=True)
+    (folder/'before-restart.json').write_text(json.dumps({
+        'version':APP_VERSION,'runtime_folder':str(sys._MEIPASS),'pid':os.getpid(),
+        'archive':os.environ.get('_PYI_ARCHIVE_FILE'),
+    }),encoding='utf-8')
+    staging=Path(tempfile.mkdtemp(prefix='REQM-FLOW-update-'))/'REQM_FLOW'
+    staging.mkdir()
+    shutil.copy2(executable,staging/'REQM_FLOW.exe')
+    launch_replacer(staging,executable.parent,os.getpid(),restart_test_folder=folder/'after-restart')
 
 
 def run(folder):
@@ -31,6 +51,10 @@ def run(folder):
         root=tk.Tk();root.withdraw();app=Desktop(root,service);root.update_idletasks()
         assert root.title().startswith('REQM FLOW')
         assert app.cloud_status.get() == '로컬 DB 저장'
+        assert [app.workspace_tabs.tab(tab,'text') for tab in app.workspace_tabs.tabs()] == ['주문 · 출고요청','실제출고','출력 이력','설정 · 백업']
+        assert [app.settings_tabs.tab(tab,'text') for tab in app.settings_tabs.tabs()] == ['설정 · 백업','매칭 설정','주문 수집']
+        assert app.workspace_tabs.select() == str(app.order_frame)
+
         assert (service.folder/'backups'/'supabase-to-local.sqlite3').exists()
         from .closed_malls import MALLS
         assert len(app.closed_mall_panel.table.get_children()) == len(MALLS)
@@ -103,7 +127,7 @@ def run(folder):
         repaired=service.tracking_rows(combined_job)
         assert [r['data']['channel'] for r in repaired]==['오늘의집','지마켓']
         assert all(r['data']['phone']=='01000000000' and r['state']=='matched' for r in repaired)
-        (folder/'self-test.json').write_text(json.dumps({'ok':True,'version':APP_VERSION,'orders':1,'artifacts':2,
+        (folder/'self-test.json').write_text(json.dumps({'ok':True,'version':APP_VERSION,'runtime_folder':str(getattr(sys,'_MEIPASS','source')),'orders':1,'artifacts':2,
             'desktop':'OK','font':app.font_family,'storage':'LOCAL','tracking':'OK','combined_import_repair':'OK',
             'workspace_roundtrip':'OK'},ensure_ascii=False),encoding='utf-8')
     except Exception as exc:

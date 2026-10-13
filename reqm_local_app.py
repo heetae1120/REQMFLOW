@@ -33,11 +33,11 @@ if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
 from reqm_local.desktop import main
 
 if __name__ == '__main__':
-    if len(sys.argv) == 3 and sys.argv[1] == '--self-test':
+    if len(sys.argv) == 3 and sys.argv[1] in ('--self-test','--self-test-restart'):
         os.environ['REQM_SELF_TEST'] = '1'
         try:
-            from reqm_local.selftest import run
-            run(sys.argv[2])
+            from reqm_local.selftest import run, run_restart
+            (run_restart if sys.argv[1]=='--self-test-restart' else run)(sys.argv[2])
         except Exception as exc:
             import json
             import traceback
