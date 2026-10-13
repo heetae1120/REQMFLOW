@@ -178,11 +178,29 @@ class Operations(TrackingOperations, VoucherOperations):
         self.backfill_legacy_smartstore_matches()
         self.confirm_existing_smartstore_matches()
         self.remember_confirmed_smartstore_splits()
+        self._assume_pending_requests_shipped()
         self.db.commit()
         self.ensure_local_transition_backup()
 
     def close(self):
         self.db.close()
+
+    def _assume_pending_requests_shipped(self):
+        """Apply the seller-file workflow's full-shipment assumption to older requests."""
+        rows=self.db.execute('''SELECT r.*,q.day FROM request_lines r
+            JOIN requests q ON q.id=r.request_id
+            WHERE NOT EXISTS (SELECT 1 FROM shipments s WHERE s.line_id=r.id)
+            ORDER BY q.day,r.rowid''').fetchall()
+        added=0
+        with self.db:
+            for line in rows:
+                order=self.db.execute('SELECT data FROM orders WHERE id=?',(line['order_id'],)).fetchone()
+                if not order or is_smartstore_channel(json.loads(order['data']).get('channel')):
+                    continue
+                if self._record_shipment(line,line['day'],line['qty'],'')=='added':
+                    added+=1
+            if added:
+                self.event('기존 출고요청 자동 출고 반영',f'{added}개 구성품')
 
     def ensure_local_transition_backup(self):
         """Keep one recoverable snapshot when moving the workspace to local-only storage."""
@@ -1119,7 +1137,7 @@ class Operations(TrackingOperations, VoucherOperations):
             if os.path.exists(temporary):
                 os.unlink(temporary)
 
-    def request(self, ids, on, path=None, excluded_channels=None, warehouse=None):
+    def request(self, ids, on, path=None, excluded_channels=None, warehouse=None, assume_shipped=False):
         on = day(on)
         selected = [o for o in self.orders() if o['id'] in ids]
         if not selected or len(selected) != len(set(ids)):
@@ -1152,12 +1170,16 @@ class Operations(TrackingOperations, VoucherOperations):
                 for index, c in enumerate(order['components']):
                     line_id = 'L-' + uuid.uuid4().hex
                     self.db.execute('INSERT INTO request_lines VALUES(?,?,?,?,?)', (line_id,batch,order['id'],index,c['quantity']))
+                    if assume_shipped:
+                        line=self.db.execute('SELECT * FROM request_lines WHERE id=?',(line_id,)).fetchone()
+                        self._record_shipment(line,on,c['quantity'],'')
                     if request_format == 'wekeep':
                         channel = d['channel'].removeprefix('리큐엠_')
                         rows.append([d['order_no'],channel,self.wekeep_output_name(c),c['quantity'],d['recipient'],d['phone'],d['postcode'],d['address'],d['memo'],''])
                     else:
                         rows.append([line_id,on,d['channel'],d['account'],d['order_no'],d['line_no'],d['recipient'],d['phone'],d['postcode'],d['address'],d['memo'],c['logistics_code'],c['name'],c['quantity']])
-                self.db.execute("UPDATE orders SET state='출고 요청' WHERE id=?", (order['id'],))
+                if not assume_shipped:
+                    self.db.execute("UPDATE orders SET state='출고 요청' WHERE id=?", (order['id'],))
             content = wekeep_workbook_bytes(rows) if request_format == 'wekeep' else workbook_bytes(headers, rows, '출고요청')
             self._artifact(batch, '출고요청', on, content, path)
             if request_format == 'wekeep':
@@ -1181,6 +1203,15 @@ class Operations(TrackingOperations, VoucherOperations):
             if old[0] != q:
                 raise ValueError('같은 출고 결과의 수량이 변경되었습니다. 이번 입력은 취소됩니다.')
             return 'duplicate'
+        assumed = self.db.execute('''SELECT id,qty FROM shipments
+            WHERE line_id=? AND tracking='' AND erp_id IS NULL ORDER BY rowid DESC LIMIT 1''',
+            (line['id'],)).fetchone()
+        if assumed:
+            if assumed['qty'] != q:
+                raise ValueError('자동 반영된 출고수량과 물류 결과 수량이 다릅니다. 이번 입력은 취소됩니다.')
+            self.db.execute('UPDATE shipments SET tracking=?,day=? WHERE id=?',
+                            (tracking,shipped_on,assumed['id']))
+            return 'updated'
         done = self.db.execute('SELECT COALESCE(SUM(qty),0) FROM shipments WHERE line_id=?', (line['id'],)).fetchone()[0]
         if done + q > line['qty']:
             raise ValueError('출고수량이 요청수량을 초과합니다. 이번 입력은 취소됩니다.')
@@ -1259,11 +1290,20 @@ class Operations(TrackingOperations, VoucherOperations):
             if product and identifier(component.get('name'))==product:product_matches.append(line)
         if product_matches:candidates=product_matches
         requested=quantity(value('수량'))
+        assumed=[]
         available=[]
         for line in candidates:
+            placeholder=self.db.execute('''SELECT qty FROM shipments
+                WHERE line_id=? AND tracking='' AND erp_id IS NULL ORDER BY rowid DESC LIMIT 1''',
+                (line['id'],)).fetchone()
+            if placeholder and placeholder['qty']==requested:
+                assumed.append(line)
+                continue
             shipped=self.db.execute('SELECT COALESCE(SUM(qty),0) FROM shipments WHERE line_id=?',(line['id'],)).fetchone()[0]
             if line['qty']-shipped >= requested:
                 available.append(line)
+        if assumed:
+            return assumed[0], value('수량'), value('송장번호')
         if not available:
             raise ValueError(f'{order_no} / {recipient}: 출고요청 행을 찾을 수 없거나 이미 전량 반영됐습니다.')
         return available[0], value('수량'), value('송장번호')

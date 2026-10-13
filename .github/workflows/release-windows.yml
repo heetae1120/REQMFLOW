@@ -9,7 +9,7 @@ on:
         type: string
   push:
     branches: [main]
-    paths: ['.github/workflows/release-windows.yml']
+    paths: ['.github/workflows/release-windows.yml', 'RELEASE_NOTES_*.md']
 
 permissions:
   contents: write

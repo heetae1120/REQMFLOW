@@ -29,10 +29,7 @@ class VoucherPanel:
         app.button(actions, '배송비 검수', self.fees)
         app.button(actions, '전표 미리보기', self.preview)
         app.button(actions, 'ERP 파일 생성', self.export, style='Accent.TButton')
-        confirm_line=ttk.Frame(parent);confirm_line.pack(fill='x',pady=4)
-        app.button(confirm_line,'선택 주문 출고 확정',self.confirm_requests)
-        ttk.Label(confirm_line,text='출고요청은 요청일 기준으로 표시됩니다. 실제 출고일을 확인해 확정한 주문만 ERP 대상이 됩니다.').pack(side='left',padx=8)
-        ttk.Label(parent, text='출고 확정 후 사용하세요. 구성품 금액은 단가가 아닌 해당 출고수량의 총금액입니다. 주문 상세는 행을 더블클릭하세요.').pack(anchor='w')
+        ttk.Label(parent, text='출고요청 파일 생성 시 요청수량 전체가 출고로 반영됩니다. 구성품 금액은 출고수량의 총금액입니다. 주문 상세는 행을 더블클릭하세요.').pack(anchor='w')
         self.tree = app.tree(parent, ['출고일', '판매처', '품목코드', '품목명', '수량', '상품금액', '상태'], [100, 130, 190, 300, 65, 110, 160])
         self.tree.bind('<Double-1>', lambda _: app.safe(self.edit))
         self.tree.tag_configure('warning', foreground='#B45309')
@@ -41,7 +38,7 @@ class VoucherPanel:
 
     def refresh(self):
         self.tree.delete(*self.tree.get_children()); self.rows = {}
-        groups = self.service.voucher_rows(self.start.get(), self.end.get(),self.show_exported.get(),include_requests=True)
+        groups = self.service.voucher_rows(self.start.get(), self.end.get(),self.show_exported.get())
         terms = self.search.get().casefold().split()
         history = self.service.voucher_review_history(self.service.voucher_rows('0001-01-01', self.end.get(), True))
         review_count = 0
@@ -64,22 +61,7 @@ class VoucherPanel:
         total = sum((g['total'] for g in groups), Decimal(0))
         pending = sum((not g['confirmed'] or bool(g['issue'])) and not g['exported'] for g in groups)
         exported=sum(g['exported'] for g in groups)
-        requests=sum(g['kind']=='request' for g in groups)
-        self.status.set(f'조회 주문 {len(groups)}건 · 출고 확인 전 {requests}건 · 이미 생성 {exported}건 · 금액/매칭 확인 필요 {pending}건 · 금액 차이 확인 {review_count}건 · 표의 금액 {total:,.0f}원')
-
-    def confirm_requests(self):
-        from tkinter.simpledialog import askstring
-        selected=list(dict.fromkeys(self.rows[key]['id'] for key in self.app.selected(self.tree)))
-        if any(self.rows[key]['kind']!='request' for key in self.app.selected(self.tree)):
-            raise ValueError('출고 확인 필요 상태의 주문만 선택하세요.')
-        value=askstring('실제 출고일 확인','선택한 주문이 실제로 출고된 날짜를 입력하세요 (YYYY-MM-DD).',initialvalue=self.end.get(),parent=self.app.root)
-        if value is None:return
-        from .service import day
-        value=day(value)
-        if not messagebox.askyesno('선택 주문 출고 확정',f'{len(selected)}개 주문의 요청수량 전체를 {value} 실제 출고로 확정할까요?',parent=self.app.root):return
-        self.service.confirm_voucher_requests(selected,value)
-        self.start.set(min(self.start.get(),value));self.end.set(max(self.end.get(),value))
-        self.app.refresh()
+        self.status.set(f'조회 주문 {len(groups)}건 · 이미 생성 {exported}건 · 금액/매칭 확인 필요 {pending}건 · 금액 차이 확인 {review_count}건 · 표의 금액 {total:,.0f}원')
 
     def reuse(self):
         count = self.service.reuse_voucher_amounts(self.start.get(), self.end.get())
@@ -90,8 +72,6 @@ class VoucherPanel:
         group = self.rows[self.app.selected(self.tree)[0]]
         if group['exported']:
             raise ValueError('이미 ERP 파일로 생성한 주문입니다. 출력 이력에서 재다운로드하세요.')
-        if group['kind']=='request':
-            raise ValueError('선택 주문 출고 확정으로 실제 출고를 먼저 확인하세요.')
         if group['kind']=='smartstore' and (group['issue'] or not group['components']):
             self.app.erp_amount_from.set(group['day']);self.app.erp_amount_through.set(group['day'])
             self.app.refresh_erp_shipments()

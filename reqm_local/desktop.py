@@ -35,7 +35,7 @@ from .shipping import compact
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.42'
+APP_VERSION = '1.9.43'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -1738,6 +1738,7 @@ class Desktop:
         warehouse_suffix='' if warehouse=='전체창고' else '_'+warehouse.split(' ',1)[0]
         batch=self.service.request(
             ids,self.today.get(),None,excluded_channels=self.request_excluded_channels,warehouse=warehouse,
+            assume_shipped=True,
         )
         if hasattr(self,'tracking_panel'):self.tracking_panel.day.set(self.today.get())
         self.refresh()

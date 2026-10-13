@@ -402,6 +402,32 @@ class LocalTests(unittest.TestCase):
         self.s.request([order['id']],'2026-10-01',self.folder/'request.xlsx')
         return self.s.db.execute('SELECT id FROM request_lines WHERE order_id=?',(order['id'],)).fetchone()[0]
 
+    def test_request_can_assume_full_shipment_and_later_attach_actual_tracking(self):
+        _,order=self.import_order()
+        self.map(order)
+        self.s.request([order['id']],'2026-10-01',self.folder/'assumed-request.xlsx',assume_shipped=True)
+        line=self.s.db.execute('SELECT id FROM request_lines WHERE order_id=?',(order['id'],)).fetchone()[0]
+        shipment=self.s.db.execute('SELECT line_id,qty,tracking,day FROM shipments WHERE line_id=?',(line,)).fetchone()
+        self.assertEqual((shipment['line_id'],shipment['qty'],shipment['tracking'],shipment['day']),
+                         (line,3,'','2026-10-01'))
+        self.assertEqual(next(o for o in self.s.orders() if o['id']==order['id'])['state'],'출고 완료')
+        self.assertEqual(self.s.voucher_rows('2026-10-01','2026-10-01')[0]['kind'],'shipment')
+
+        self.assertEqual(self.result(line,3,'TRACK-ACTUAL','2026-10-02'),(1,0))
+        shipment=self.s.db.execute('SELECT qty,tracking,day FROM shipments WHERE line_id=?',(line,)).fetchone()
+        self.assertEqual((shipment['qty'],shipment['tracking'],shipment['day']),(3,'TRACK-ACTUAL','2026-10-02'))
+        self.assertEqual(self.s.delete_orders([order['id']]),1)
+        self.assertEqual(self.s.db.execute('SELECT COUNT(*) FROM shipments').fetchone()[0],0)
+
+    def test_existing_unconfirmed_requests_are_assumed_shipped_on_reopen(self):
+        _,order=self.import_order()
+        line=self.request(order)
+        self.s.close()
+        self.s=Operations(self.folder/'data',REFERENCE)
+        shipment=self.s.db.execute('SELECT line_id,qty,day FROM shipments WHERE line_id=?',(line,)).fetchone()
+        self.assertEqual((shipment['line_id'],shipment['qty'],shipment['day']),(line,3,'2026-10-01'))
+        self.assertEqual(next(o for o in self.s.orders() if o['id']==order['id'])['state'],'출고 완료')
+
     def result(self, line, q, tracking='T1', on='2026-10-01'):
         path=self.folder/'result.xlsx';path.write_bytes(workbook_bytes(RESULT_COLUMNS,[[line,q,tracking,on]]))
         return self.s.import_results(path)
@@ -1288,7 +1314,8 @@ class LocalTests(unittest.TestCase):
         db=sqlite3.connect(self.folder/'backup.sqlite3')
         self.assertEqual(db.execute('SELECT COUNT(*) FROM request_lines').fetchone()[0],1);db.close()
         self.s.close();self.s=Operations(self.folder/'data',REFERENCE)
-        self.assertEqual(self.s.orders()[0]['state'],'출고 요청')
+        self.assertEqual(self.s.orders()[0]['state'],'출고 완료')
+        self.assertEqual(self.s.db.execute('SELECT COUNT(*) FROM shipments').fetchone()[0],1)
 
     def test_shared_shipping_fee_on_first_order_export_only(self):
         _,first=self.import_order(line='A1');_,second=self.import_order(line='A2')
