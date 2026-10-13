@@ -99,10 +99,16 @@ def prepare_update(release):
     return source
 
 
+def update_backup_directory(install_dir):
+    """Keep rollback executables outside the installation folder and desktop."""
+    identity = hashlib.sha256(str(Path(install_dir).resolve()).casefold().encode('utf-8')).hexdigest()[:16]
+    return Path(os.environ.get('LOCALAPPDATA', tempfile.gettempdir()))/'REQM-Local'/'update-backups'/identity
+
+
 def launch_replacer(source, install_dir, process_id, *, restart_test_folder=None):
     source,install_dir = Path(source).resolve(),Path(install_dir).resolve()
     script = source.parent/'apply-update.ps1'
-    script.write_text(r'''param([string]$Source,[string]$Target,[int]$ProcessId,[string]$RestartTestFolder='')
+    script.write_text(r'''param([string]$Source,[string]$Target,[int]$ProcessId,[string]$BackupDirectory,[string]$RestartTestFolder='')
 $ErrorActionPreference = 'Stop'
 $env:PYINSTALLER_RESET_ENVIRONMENT = '1'
 for($i=0; $i -lt 120; $i++) {
@@ -113,8 +119,9 @@ if(Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) { exit 2 }
 New-Item -ItemType Directory -Force -Path $Target | Out-Null
 ${newExe} = Join-Path $Source 'REQM_FLOW.exe'
 ${targetExe} = Join-Path $Target 'REQM_FLOW.exe'
-${backupExe} = Join-Path $Target 'REQM_FLOW.previous.exe'
+${backupExe} = Join-Path $BackupDirectory 'REQM_FLOW.previous.exe'
 if(-not (Test-Path -LiteralPath ${newExe})) { exit 3 }
+New-Item -ItemType Directory -Force -Path $BackupDirectory | Out-Null
 if(Test-Path -LiteralPath ${backupExe}) { Remove-Item -LiteralPath ${backupExe} -Force }
 if(Test-Path -LiteralPath ${targetExe}) { Move-Item -LiteralPath ${targetExe} -Destination ${backupExe} -Force }
 try {
@@ -142,6 +149,7 @@ if($stagePath.StartsWith($tempPath,[StringComparison]::OrdinalIgnoreCase) -and
     command=[
         'powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(script),
         '-Source',str(source),'-Target',str(install_dir),'-ProcessId',str(process_id),
+        '-BackupDirectory',str(update_backup_directory(install_dir)),
     ]
     if restart_test_folder is not None:
         command.extend(['-RestartTestFolder',str(Path(restart_test_folder).resolve())])
@@ -154,16 +162,22 @@ def install_directory():
 
 
 def cleanup_legacy_install():
-    """Remove only a verified old PyInstaller onedir runtime after onefile starts."""
+    """Move old desktop backups, then remove a verified old onedir runtime."""
     if not getattr(sys,'frozen',False):
         return False
     install_dir=install_directory()
+    previous=install_dir/'REQM_FLOW.previous.exe'
+    migrated=False
+    if previous.is_file():
+        backup_dir=update_backup_directory(install_dir)
+        backup_dir.mkdir(parents=True,exist_ok=True)
+        destination=backup_dir/previous.name
+        shutil.copy2(previous,destination)
+        previous.unlink()
+        migrated=True
     legacy=install_dir/'_internal'
     markers=(legacy/'base_library.zip',legacy/'assets'/'branding',legacy/'reference_data')
     if not all(marker.exists() for marker in markers):
-        return False
+        return migrated
     shutil.rmtree(legacy)
-    previous=install_dir/'REQM_FLOW.previous.exe'
-    if previous.is_file():
-        previous.unlink()
     return True
