@@ -42,6 +42,37 @@ class DailyB2CTests(unittest.TestCase):
         self.assertIsNotNone(self.s.db.execute('SELECT content FROM artifacts WHERE id=?',(job,)).fetchone())
         self.assertEqual(self.s.orders()[0]['state'],'출고 요청')
 
+    def test_wekeep_export_resolves_old_cached_names_without_changing_orders(self):
+        job,oid=self.request()
+        order=next(o for o in self.s.orders() if o['id']==oid)
+        components=order['components']
+        components[0]['name']='[리큐엠] 예전 상품명'
+        with self.s.db:
+            self.s.db.execute('UPDATE orders SET components=?,state=? WHERE id=?',
+                (encode(components),'출고 준비',oid))
+        expected=self.s.wekeep_output_name(components[0])
+        self.assertNotIn('리큐엠',expected)
+        self.assertNotEqual(expected,'예전 상품명')
+        # Old tracking jobs must also resolve the current item name on download.
+        target=self.folder/'old-job.xlsx'
+        self.s.export_wekeep_jobs([job],target,True)
+        book=load_workbook(target)
+        self.assertEqual(book.active['C2'].value,expected);book.close()
+        with self.s.db:self.s.db.execute('DELETE FROM request_lines WHERE request_id=?',(job,))
+        new_job=self.s.request([oid],DAY)
+        content=self.s.db.execute('SELECT content FROM artifacts WHERE id=?',(new_job,)).fetchone()[0]
+        book=load_workbook(io.BytesIO(content))
+        self.assertEqual(book.active['C2'].value,expected);book.close()
+        self.assertEqual(self.s.orders()[0]['components'][0]['name'],'[리큐엠] 예전 상품명')
+
+    def test_brand_prefix_removal_preserves_product_details(self):
+        from reqm_local.output_names import without_brand_prefix
+        self.assertEqual(without_brand_prefix('[리큐엠]C.class K-CC150-실리콘케이블 블루(100W)'),
+                         'C.class K-CC150-실리콘케이블 블루(100W)')
+        self.assertEqual(without_brand_prefix('리큐엠-UV살균기 무선충전 시계_블랙'),
+                         'UV살균기 무선충전 시계_블랙')
+        self.assertEqual(without_brand_prefix('[1.5M] 실리콘케이블'),'[1.5M] 실리콘케이블')
+
     def test_batch_auto_confirms_and_keeps_shipping_state_and_exports(self):
         a,oid=self.request('A');b,_=self.request('B','무신사')
         expected={j:encode(self.s.active_tracking_rows(j)) for j in (a,b)}

@@ -107,7 +107,7 @@ class TrackingOperations:
         for line in lines:
             original=json.loads(line['data'])
             component=json.loads(line['components'])[line['component']]
-            data={**original,'product':component['name'],'quantity':str(line['qty']),
+            data={**original,'product':self.wekeep_output_name(component),'quantity':str(line['qty']),
                   '_request_line_id':line['id'],'_original_data':original}
             self.db.execute('INSERT INTO tracking_rows(id,job_id,order_id,data,state) VALUES(?,?,?,?,?)',
                 (uuid.uuid4().hex,batch,line['order_id'],encode(data),'pending'))
@@ -177,6 +177,7 @@ class TrackingOperations:
 
     def export_wekeep_jobs(self,job_ids,path,with_tracking=False,confirmed_only=False):
         from .files import wekeep_workbook_bytes
+        from .output_names import without_brand_prefix
         entries=[r for job in dict.fromkeys(job_ids) for r in self.active_tracking_rows(job)]
         if confirmed_only:
             entries=[r for r in entries if r['state']=='confirmed']
@@ -184,7 +185,14 @@ class TrackingOperations:
             raise ValueError('다운로드할 출고요청이 없습니다.')
         values=[]
         for row in entries:
-            d=row['data']
+            d=dict(row['data'])
+            line=self.db.execute('''SELECT o.components,r.component FROM request_lines r
+                JOIN orders o ON o.id=r.order_id WHERE r.id=?''',
+                (d.get('_request_line_id'),)).fetchone()
+            if line:
+                d['product']=self.wekeep_output_name(json.loads(line['components'])[line['component']])
+            else:
+                d['product']=without_brand_prefix(d.get('product'))
             values.append([identity(d.get(k)).removeprefix('리큐엠_') if k=='channel' else identity(d.get(k)) for k in ('order_no','channel','product','quantity','recipient','phone','postcode','address','memo')]+
                 [row['tracking'] if with_tracking and row['state']=='confirmed' else ''])
         Path(path).write_bytes(wekeep_workbook_bytes(values))

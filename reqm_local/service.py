@@ -25,6 +25,7 @@ from .files import (
 from .esm import parse_esm_rows
 from .profiles import SMARTSTORE_PURCHASE_CHANNEL
 from .tracking_store import TrackingOperations
+from .output_names import without_brand_prefix
 
 
 SMARTSTORE_CHANNEL = '리큐엠_스마트스토어'
@@ -252,6 +253,10 @@ class Operations(TrackingOperations):
     def item_name_rows(self):
         return [{'erp_item_code':code,'matching_name':name}
                 for code,name in sorted(self.active_shipping_items.items(),key=lambda item:(item[1],item[0]))]
+
+    def wekeep_output_name(self, component):
+        code = component.get('code') or component.get('logistics_code')
+        return without_brand_prefix(self.item_name(code, component.get('name', '')))
 
     def save_item_name(self, erp_item_code, matching_name, original_code=''):
         code=identifier(erp_item_code);name=identifier(matching_name);original=identifier(original_code)
@@ -1092,7 +1097,7 @@ class Operations(TrackingOperations):
                     self.db.execute('INSERT INTO request_lines VALUES(?,?,?,?,?)', (line_id,batch,order['id'],index,c['quantity']))
                     if request_format == 'wekeep':
                         channel = d['channel'].removeprefix('리큐엠_')
-                        rows.append([d['order_no'],channel,c['name'],c['quantity'],d['recipient'],d['phone'],d['postcode'],d['address'],d['memo'],''])
+                        rows.append([d['order_no'],channel,self.wekeep_output_name(c),c['quantity'],d['recipient'],d['phone'],d['postcode'],d['address'],d['memo'],''])
                     else:
                         rows.append([line_id,on,d['channel'],d['account'],d['order_no'],d['line_no'],d['recipient'],d['phone'],d['postcode'],d['address'],d['memo'],c['logistics_code'],c['name'],c['quantity']])
                 self.db.execute("UPDATE orders SET state='출고 요청' WHERE id=?", (order['id'],))
