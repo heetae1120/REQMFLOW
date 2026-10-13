@@ -35,7 +35,7 @@ from .shipping import compact
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.36'
+APP_VERSION = '1.9.37'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -497,9 +497,11 @@ class Desktop:
             [120,105,120,130,160,100,125,260,190,260,65,100,150,90,220,90,190],
         )
         self.history.bind('<Double-1>',lambda _event:self.safe(self.edit_history_note))
-        ttk.Label(settings_frame,text='모든 주문·매칭·출고·ERP 자료는 이 PC에만 저장됩니다.',font=(self.font_family,16,'bold')).pack(anchor='w',pady=10)
+        ttk.Label(settings_frame,text='로컬 저장 및 Supabase 공유 동기화',font=(self.font_family,16,'bold')).pack(anchor='w',pady=10)
         ttk.Label(settings_frame,text=str(service.folder),wraplength=1100).pack(anchor='w')
-        ttk.Label(settings_frame,text='설정 파일에서 판매처별 헤더·계정·파일명 단서와 출력 열 이름을 변경할 수 있습니다.\n주문에 포함된 배송비는 원본의 배송비 합계를 사용합니다. 실제 거래처 규칙을 확인하세요.\nDB는 operations.sqlite3에 저장되며 Supabase 사용량이나 인터넷 연결에 영향을 받지 않습니다.\n전환 전 로컬 캐시는 backups\\supabase-to-local.sqlite3에 한 번 자동 백업됩니다.',wraplength=1100).pack(anchor='w',pady=16)
+        ttk.Label(settings_frame,text='작업은 operations.sqlite3에 저장합니다. 공유 동기화를 켜면 변경된 자료만 같은 작업공간의 PC에 반영합니다.\n최초 연결 시 다른 자료는 비교 후 선택하며, 연결 오류 중에도 로컬 자료는 유지합니다.',wraplength=1100).pack(anchor='w',pady=8)
+        from .sync_ui import SyncPanel
+        self.sync_panel=SyncPanel(self,settings_frame)
         line = ttk.Frame(settings_frame); line.pack(anchor='w')
         self.button(line,'설정 파일 열기',lambda:os.startfile(service.folder/'settings.json'))
         self.button(line,'설정 다시 읽기',self.reload_settings)
@@ -1135,7 +1137,10 @@ class Desktop:
 
     def safe(self,fn):
         try:
+            before=self.service.db.total_changes
             fn()
+            if self.service.db.total_changes!=before and hasattr(self,'sync_panel'):
+                self.sync_panel.next_at=0
         except Exception as exc:
             messagebox.showerror('작업 확인',str(exc),parent=self.root)
 
