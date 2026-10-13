@@ -163,7 +163,7 @@ class TrackingPanel:
         for label, var, show in [('아이디', user_var, ''), ('비밀번호', password_var, '*')]:
             ttk.Label(win, text=label).pack(anchor='w', padx=16, pady=(12, 2))
             ttk.Entry(win, textvariable=var, show=show, width=36).pack(padx=16)
-        ttk.Label(win, text='로그인 정보는 이 PC에 암호화해 저장합니다. 브라우저에서 직접 로그인할 수도 있습니다.').pack(padx=16, pady=10)
+        ttk.Label(win, text='로그인 정보는 이 PC에 암호화해 저장합니다. 송장 조회는 이 계정으로 창 없이 진행합니다.').pack(padx=16, pady=10)
         def save():
             save_credentials(self.service.folder / 'wekeep_credentials.bin', user_var.get(), password_var.get(), '위킵')
             win.destroy()
@@ -179,7 +179,7 @@ class TrackingPanel:
         kind = self.jobs[job]['kind']
         expected = encode(self.service.tracking_rows(job))
         self.busy = True
-        self.status.set('위킵 브라우저를 여는 중입니다.')
+        self.status.set('위킵 송장 백그라운드 조회를 시작합니다.')
         folder = self.service.folder
         def worker():
             try:

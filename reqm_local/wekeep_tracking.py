@@ -219,31 +219,48 @@ def collect_tracking(driver, start, end, kind, wait_factory=None, report=lambda 
 def fetch_tracking(folder, start, end, kind, report=lambda text: None):
     from .closed_mall_browser import create_login_driver
     from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.common.exceptions import TimeoutException
     if not LOCK.acquire(blocking=False):
         raise RuntimeError('이미 위킵 송장을 조회하고 있습니다.')
     driver = None
     try:
         # Dedicated FLOW profile; Shipping's saved browser and credentials are untouched.
-        driver = create_login_driver(folder / 'wekeep', False)
+        driver = create_login_driver(folder / 'wekeep', True)
         driver.set_page_load_timeout(45)
         driver.get(SEARCH_URL)
         if not search_destination(driver.current_url):
             user, password = load_credentials(folder / 'wekeep_credentials.bin')
+            if not user or not password:
+                raise ValueError('위킵 로그인 계정을 먼저 저장하세요. 송장 조회는 브라우저 창 없이 진행됩니다.')
+            report('저장된 위킵 계정으로 백그라운드 로그인 중입니다.')
+            try:
+                WebDriverWait(driver, 30).until(lambda d: d.find_elements('css selector', 'input[name="j_username"]')
+                                                and d.find_elements('css selector', 'input[name="j_password"]'))
+            except TimeoutException:
+                raise RuntimeError('위킵 로그인 화면을 확인하지 못했습니다. 저장된 계정과 위킵 접속 상태를 확인하세요.') from None
             fields = driver.find_elements('css selector', 'input[name="j_username"]')
             passwords = driver.find_elements('css selector', 'input[name="j_password"]')
             if user and password and len(fields) == len(passwords) == 1:
+                fields[0].clear()
+                passwords[0].clear()
                 fields[0].send_keys(user)
                 passwords[0].send_keys(password)
                 buttons = driver.find_elements('css selector', 'input[type="submit"][value="시작하기"]')
                 if len(buttons) == 1:
                     buttons[0].click()
-            report('위킵 브라우저에서 로그인을 완료하세요. 로그인 후 송장 조회를 이어갑니다.')
-            WebDriverWait(driver, 180).until(lambda d: urlsplit(d.current_url).hostname == 'fbw.wekeep.co.kr'
-                                            and '/order/' in urlsplit(d.current_url).path)
+                else:
+                    raise RuntimeError('위킵 로그인 버튼을 확인하지 못했습니다. 위킵 로그인 화면이 변경됐는지 확인하세요.')
+            else:
+                raise RuntimeError('위킵 로그인 입력칸을 확인하지 못했습니다.')
+            try:
+                WebDriverWait(driver, 45).until(lambda d: urlsplit(d.current_url).hostname == 'fbw.wekeep.co.kr'
+                                                and '/order/' in urlsplit(d.current_url).path)
+            except TimeoutException:
+                raise RuntimeError('위킵 자동 로그인에 실패했습니다. 위킵 로그인 계정의 아이디·비밀번호를 확인하세요. 브라우저 창은 열지 않습니다.') from None
             driver.get(SEARCH_URL)
         if not search_destination(driver.current_url):
             raise RuntimeError('위킵 주문 상세검색에 연결하지 못했습니다.')
-        report('위킵 주문과 송장번호를 조회하고 있습니다.')
+        report('위킵 주문과 송장번호를 백그라운드에서 조회하고 있습니다.')
         return collect_tracking(driver, start, end, kind, report=report)
     finally:
         try:
