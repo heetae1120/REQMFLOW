@@ -26,6 +26,9 @@ outputs/
 *.sqlite3-shm
 
 # Editor and operating-system files
+# Buildless web source is intentionally versioned for shared development.
+!/web/dist/
+!/web/dist/**
 .idea/
 .vscode/
 .DS_Store
