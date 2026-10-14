@@ -605,10 +605,14 @@ def workbook_bytes(headers, rows, title='자료'):
     for row in rows:
         sheet.append(row)
     from openpyxl.styles import Font, PatternFill
+    money_columns = {index for index, header in enumerate(headers, 1)
+                     if '금액' in str(header) or header in ('단가','공급가액','부가세','배송비','판매가','공급가')}
     for row in sheet:
         for cell in row:
             if isinstance(cell.value, str):
                 cell.data_type = 's'  # Untrusted spreadsheet strings must never become formulas.
+            elif cell.row > 1 and cell.column in money_columns:
+                cell.number_format = '#,##0'
     for cell in sheet[1]:
         cell.font = Font(color='FFFFFF', bold=True)
         cell.fill = PatternFill('solid', fgColor='173C4A')

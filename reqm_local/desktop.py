@@ -24,7 +24,7 @@ from .files import (
 from .service import Operations
 from .ui_helpers import (
     autosize_tree, bind_desktop_drag, bind_tree_sorting, bind_tree_column_resize, bind_wide_combobox, filter_combobox_choices,
-    post_combobox, search_suggestions, hide_combobox_popups,
+    post_combobox, search_suggestions, hide_combobox_popups, format_money,
 )
 from .profiles import (
     PROFILE_PRESETS, SALES_CHANNELS, MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING,
@@ -35,7 +35,7 @@ from .shipping import compact
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.44'
+APP_VERSION = '1.9.45'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -1555,7 +1555,7 @@ class Desktop:
         key=self.selected(self.table)[0]; order=self.rows[key]; data=order['data']
         source_product=data.get('source_product',data['product']); source_option=data.get('source_option',data['option'])
         from decimal import Decimal
-        event_unit_amount=data.get('event_unit_amount') or str((Decimal(data['amount'])/Decimal(max(1,int(data['quantity'])))).quantize(Decimal('1')))
+        event_unit_amount=format_money(data.get('event_unit_amount') or str((Decimal(data['amount'])/Decimal(max(1,int(data['quantity'])))).quantize(Decimal('1'))), grouped=False)
         win=tk.Toplevel(self.root);win.title('판매처 이벤트 상품 규칙')
         win.geometry(f"{max(960,min(1500,win.winfo_screenwidth()-80))}x680")
         frame=ttk.Frame(win,padding=18);frame.pack(fill='both',expand=True)
@@ -2054,7 +2054,8 @@ class Desktop:
             item_id=f'amount-split-{index}';self.amount_split_rows[item_id]=row
             self.erp_shipments.insert('', 'end', iid=item_id, values=[
                 row['day'],row['channel'],row['order_no'],row['recipient'],row['component_count'],
-                f"{int(Decimal(row['total'])):,}",row.get('product',''),row.get('option',''),row['summary'],
+                format_money(row['total']),row.get('product',''),row.get('option',''),
+                ' / '.join(f"{item['name']} {format_money(item['amount'])}원" for item in row['components']),
             ])
         self.root.after_idle(lambda:autosize_tree(self.erp_shipments,maximum=320))
 
@@ -2136,7 +2137,7 @@ class Desktop:
         value=simpledialog.askstring(
             'ERP 금액 매칭',
             f"주문번호: {shipment['order_no']}\n품목: {shipment['product']}\n출고수량: {shipment['quantity']}\n\n이카운트에 반영할 총금액을 입력하세요.",
-            initialvalue=shipment['amount'],parent=self.root,
+            initialvalue=format_money(shipment['amount'], grouped=False),parent=self.root,
         )
         if value is None:return
         self.service.set_erp_amount(shipment_id,value.replace(',',''))

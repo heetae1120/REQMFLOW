@@ -2,9 +2,23 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import tkinter as tk
 import tkinter.font as tkfont
+
+
+def format_money(value, grouped=True):
+    """Display whole won without changing the stored amount."""
+    if value is None or value == '':
+        return ''
+    try:
+        amount = Decimal(str(value).replace(',', ''))
+        if not amount.is_finite():
+            return str(value)
+        amount = amount.quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+    except InvalidOperation:
+        return str(value)
+    return f'{amount:,.0f}' if grouped else f'{amount:.0f}'
 
 
 SEARCH_GROUPS = (
