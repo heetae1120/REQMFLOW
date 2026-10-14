@@ -14,6 +14,7 @@ class VoucherPanel:
         self.search = tk.StringVar()
         self.status = tk.StringVar()
         self.show_exported=tk.BooleanVar(value=True)
+        self.output_scope=tk.StringVar(value='전체 판매처')
         line = ttk.Frame(parent); line.pack(fill='x')
         for label, variable in (('출고 시작일', self.start), ('종료일', self.end), ('전표일', self.voucher_day)):
             ttk.Label(line, text=label).pack(side='left', padx=4)
@@ -22,6 +23,14 @@ class VoucherPanel:
         app.button(line, '기존 세트 금액 적용', self.reuse)
         app.button(line, '색상 공유 그룹', self.families)
         ttk.Checkbutton(line,text='기존 생성 이력 포함',variable=self.show_exported,command=lambda:app.safe(self.refresh)).pack(side='left',padx=4)
+        output=ttk.Frame(parent);output.pack(fill='x',pady=(8,0))
+        ttk.Label(output,text='출력 대상').pack(side='left',padx=4)
+        scope=ttk.Combobox(output,textvariable=self.output_scope,state='readonly',width=22,
+                           values=['전체 판매처','옥션·지마켓 제외','옥션·지마켓만'])
+        scope.pack(side='left',padx=4)
+        scope.bind('<<ComboboxSelected>>',lambda _event:app.safe(self.scope_changed))
+        ttk.Button(output,textvariable=app.erp_exclusion_text,command=lambda:app.safe(lambda:app.choose_channel_exclusions('erp'))).pack(side='left',padx=4)
+        ttk.Label(output,text='배송비는 주문당 한 번 반영합니다.',foreground='#64748B').pack(side='left',padx=8)
         actions = ttk.Frame(parent); actions.pack(fill='x', pady=8)
         ttk.Label(actions, text='주문번호·수령인·판매처·품목 검색').pack(side='left')
         entry = ttk.Entry(actions, textvariable=self.search, width=28); entry.pack(side='left', padx=5)
@@ -37,9 +46,26 @@ class VoucherPanel:
         ttk.Label(parent, textvariable=self.status).pack(anchor='w', pady=6)
         self.rows = {}
 
+    def export_options(self):
+        return dict(include_esm=self.output_scope.get()!='옥션·지마켓 제외' and self.app.erp_include_esm.get(),
+                    only_esm=self.output_scope.get()=='옥션·지마켓만',
+                    excluded_channels=self.app.erp_excluded_channels)
+
+    def scope_changed(self):
+        self.app.erp_include_esm.set(self.output_scope.get()!='옥션·지마켓 제외')
+        self.refresh()
+
+    def groups(self):
+        from .service import is_excluded_channel
+        options=self.export_options()
+        return [group for group in self.service.voucher_rows(self.start.get(),self.end.get(),self.show_exported.get())
+                if not is_excluded_channel(group['channel'],options['excluded_channels'])
+                and (not options['only_esm'] or group['kind']=='esm')
+                and (options['include_esm'] or group['kind']!='esm')]
+
     def refresh(self):
         self.tree.delete(*self.tree.get_children()); self.rows = {}
-        groups = self.service.voucher_rows(self.start.get(), self.end.get(),self.show_exported.get())
+        groups = self.groups()
         terms = self.search.get().casefold().split()
         history = self.service.voucher_review_history(self.service.voucher_rows('0001-01-01', self.end.get(), True))
         review_count = 0
@@ -63,6 +89,7 @@ class VoucherPanel:
         pending = sum((not g['confirmed'] or bool(g['issue'])) and not g['exported'] for g in groups)
         exported=sum(g['exported'] for g in groups)
         self.status.set(f'조회 주문 {len(groups)}건 · 이미 생성 {exported}건 · 금액/매칭 확인 필요 {pending}건 · 금액 차이 확인 {review_count}건 · 표의 금액 {total:,.0f}원')
+        self.app.workflow_statuses[2].set(f'대상 {len(groups):,}건 · 금액/매칭 확인 {pending:,}건 · 금액 차이 확인 {review_count:,}건 · 생성 완료 {exported:,}건')
 
     def reuse(self):
         count = self.service.reuse_voucher_amounts(self.start.get(), self.end.get())
@@ -138,7 +165,7 @@ class VoucherPanel:
         self.app.button(frame, '닫기', win.destroy)
 
     def fees(self):
-        groups = self.service.voucher_rows(self.start.get(), self.end.get())
+        groups = self.groups()
         win = tk.Toplevel(self.app.root); win.title('주문별 배송비 검수'); win.geometry('950x600'); win.transient(self.app.root); win.grab_set()
         ttk.Label(win, text='같은 판매처·계정·주문번호에는 배송비를 한 번 반영합니다. 금액이 다르면 행을 더블클릭해 확정하세요.', padding=12).pack(anchor='w')
         tree = self.app.tree(win, ['판매처', '계정', '주문번호', '원본 배송비', '전표 배송비', '상태'], [130, 100, 180, 180, 120, 180])
@@ -178,7 +205,7 @@ class VoucherPanel:
         tree.bind('<Double-1>',lambda event:self.app.safe(lambda:edit(event)))
 
     def preview(self):
-        rows = self.service.export_erp(self.voucher_day.get(), self.end.get(), None, from_day=self.start.get(), preview=True)
+        rows = self.service.export_erp(self.voucher_day.get(), self.end.get(), None, from_day=self.start.get(), preview=True, **self.export_options())
         win = tk.Toplevel(self.app.root); win.title('전표 미리보기'); win.geometry('1100x650'); win.transient(self.app.root); win.grab_set()
         total = sum(r[15] * r[16] for r in rows)
         ttk.Label(win, text=f'전표일 {self.voucher_day.get()} · {len(rows)}행 · 배송비 포함 총금액 {total:,}원', padding=12).pack(anchor='w')
@@ -188,9 +215,9 @@ class VoucherPanel:
 
     def export(self):
         # Validate before prompting for a destination.
-        self.service.export_erp(self.voucher_day.get(), self.end.get(), None, from_day=self.start.get(), preview=True)
+        self.service.export_erp(self.voucher_day.get(), self.end.get(), None, from_day=self.start.get(), preview=True, **self.export_options())
         path = self.app.save_path('ERP_' + self.voucher_day.get() + '.xlsx')
         if path:
-            self.service.export_erp(self.voucher_day.get(), self.end.get(), path, from_day=self.start.get())
+            self.service.export_erp(self.voucher_day.get(), self.end.get(), path, from_day=self.start.get(), **self.export_options())
             self.app.refresh()
             messagebox.showinfo('ERP 파일 생성', '파일을 저장했습니다. 출력 이력에서 다시 내려받을 수 있습니다.')
