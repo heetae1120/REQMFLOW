@@ -5,6 +5,65 @@ import unicodedata
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import tkinter as tk
 import tkinter.font as tkfont
+from tkinter import ttk
+
+
+def after_latest(widget, key, callback, delay=160):
+    """Coalesce input work while leaving native text editing uninterrupted."""
+    jobs=getattr(widget,'_reqm_input_jobs',{})
+    if key in jobs:
+        widget.after_cancel(jobs[key])
+    def run():
+        jobs.pop(key,None)
+        if widget.winfo_exists():callback()
+    jobs[key]=widget.after(delay,run)
+    widget._reqm_input_jobs=jobs
+    if not getattr(widget,'_reqm_input_cleanup',False):
+        def cleanup(event):
+            if event.widget==widget:
+                for job in list(jobs.values()):widget.after_cancel(job)
+                jobs.clear()
+        widget.bind('<Destroy>',cleanup,add='+')
+        widget._reqm_input_cleanup=True
+
+
+def scroll_form_event(event):
+    widget=event.widget
+    while widget is not None:
+        canvas=getattr(widget,'_reqm_scroll_surface',None)
+        if canvas is not None:
+            hide_combobox_popups(widget._root())
+            units=-int(event.delta/120) if getattr(event,'delta',0) else (1 if getattr(event,'num',0)==5 else -1)
+            canvas.yview_scroll(units or (-1 if event.delta>0 else 1),'units')
+            return 'break'
+        widget=getattr(widget,'master',None)
+
+
+def scrollable_form(parent):
+    shell=ttk.Frame(parent);shell.pack(fill='both',expand=True)
+    shell.rowconfigure(0,weight=1);shell.columnconfigure(0,weight=1)
+    canvas=tk.Canvas(shell,highlightthickness=0,bg='#F4F7FB',yscrollincrement=24)
+    canvas.grid(row=0,column=0,sticky='nsew')
+    vertical=ttk.Scrollbar(shell,orient='vertical',command=canvas.yview)
+    vertical.grid(row=0,column=1,sticky='ns')
+    horizontal=ttk.Scrollbar(shell,orient='horizontal',command=canvas.xview)
+    horizontal.grid(row=1,column=0,sticky='ew')
+    canvas.configure(yscrollcommand=vertical.set,xscrollcommand=horizontal.set)
+    content=ttk.Frame(canvas)
+    window=canvas.create_window(0,0,window=content,anchor='nw')
+    content._reqm_scroll_surface=canvas
+    def layout(_event=None):
+        canvas.itemconfigure(window,width=max(canvas.winfo_width(),content.winfo_reqwidth()))
+        canvas.configure(scrollregion=canvas.bbox('all'))
+    canvas.bind('<Configure>',layout);content.bind('<Configure>',layout)
+    root=parent._root()
+    if not getattr(root,'_reqm_form_scroll_bound',False):
+        for sequence in ('<MouseWheel>','<Button-4>','<Button-5>'):
+            root.bind_all(sequence,scroll_form_event,add='+')
+        root._reqm_form_scroll_bound=True
+    canvas.bind('<ButtonPress-2>',lambda e:canvas.scan_mark(e.x,e.y))
+    canvas.bind('<B2-Motion>',lambda e:canvas.scan_dragto(e.x,e.y,gain=1))
+    return content
 
 
 def format_money(value, grouped=True):
@@ -112,7 +171,6 @@ def bind_wide_combobox(widget) -> None:
             widget.focus_force()
             widget.after_idle(show_current)
             return 'break'
-        widget.after_idle(show_current)
 
     def move(delta):
         widget._reqm_popup_suppressed=False
@@ -157,6 +215,11 @@ def bind_wide_combobox(widget) -> None:
     widget.bind('<Return>',choose_active,add='+')
     widget.bind('<Escape>',lambda _event:_hide_combobox_popup(widget),add='+')
     widget.bind('<Alt-Down>',lambda _event:move(1),add='+')
+    def wheel(event):
+        scroll_form_event(event)
+        return 'break'
+    for sequence in ('<MouseWheel>','<Button-4>','<Button-5>'):
+        widget.bind(sequence,wheel)
 
 
 def _popup_eligible(widget):
@@ -228,31 +291,43 @@ def post_combobox(widget, values, delay: int = 0) -> None:
         listbox=tk.Listbox(
             frame,exportselection=False,activestyle='dotbox',relief='flat',borderwidth=0,
             bg='#FFFFFF',fg='#172033',selectbackground='#2563EB',selectforeground='#FFFFFF',
-            font=tkfont.nametofont('TkDefaultFont'),highlightthickness=0,
+            font=tkfont.nametofont('TkDefaultFont',root=widget._root()),highlightthickness=0,
         )
         scrollbar=tk.Scrollbar(frame,orient='vertical',command=listbox.yview)
         listbox.configure(yscrollcommand=scrollbar.set)
         listbox.pack(side='left',fill='both',expand=True);scrollbar.pack(side='right',fill='y')
         widget._reqm_popup=popup;widget._reqm_popup_list=listbox
+        click={'row':None,'y':0,'dragged':False}
+        def press(event):
+            click.update(row=listbox.nearest(event.y),y=event.y,dragged=False)
+        def drag(event):
+            if abs(event.y-click['y'])>4:click['dragged']=True
         def choose(event):
             if not _popup_eligible(widget) or not popup.winfo_viewable() or getattr(root,'_reqm_popup_owner',None)!=widget:
                 _hide_combobox_popup(widget);return 'break'
             index=listbox.nearest(event.y)
+            if getattr(event,'keysym','')!='Return' and (click['row']!=index or click['dragged']):
+                click['row']=None
+                return 'break'
+            click['row']=None
             if not 0 <= index < listbox.size():return
             value=listbox.get(index)
             widget.set(value);widget.icursor('end')
             _hide_combobox_popup(widget);widget.focus_set()
             widget.event_generate('<<ComboboxSelected>>')
+        listbox.bind('<ButtonPress-1>',press)
+        listbox.bind('<B1-Motion>',drag,add='+')
         listbox.bind('<ButtonRelease-1>',choose)
-        listbox.bind('<Return>',lambda _event:choose(type('Event',(),{'y':listbox.bbox('active')[1] if listbox.bbox('active') else 0})()))
+        listbox.bind('<Return>',lambda _event:choose(type('Event',(),{'keysym':'Return','y':listbox.bbox('active')[1] if listbox.bbox('active') else 0})()))
         widget.bind('<Destroy>',lambda _event:popup.destroy() if popup.winfo_exists() else None,add='+')
     listbox=widget._reqm_popup_list
     if getattr(widget,'_reqm_popup_values',None)!=values:
         listbox.delete(0,'end')
         listbox.insert('end',*values)
     widget._reqm_popup_values=values
-    font=tkfont.nametofont('TkDefaultFont')
-    width=max(widget.winfo_width(),min(960,max((font.measure(str(value)) for value in values),default=0)+48))
+    font=tkfont.nametofont('TkDefaultFont',root=widget._root())
+    # Measure visible suggestions only; large catalogs must not stall each keystroke.
+    width=max(widget.winfo_width(),min(960,max((font.measure(str(value)) for value in values[:12]),default=0)+48))
     rows=min(12,max(1,len(values)));height=rows*(font.metrics('linespace')+7)+4
     x=widget.winfo_rootx();y=widget.winfo_rooty()+widget.winfo_height()
     screen_width=widget.winfo_screenwidth();screen_height=widget.winfo_screenheight()
@@ -278,8 +353,8 @@ def autosize_tree(tree, *, minimum: int = 58, maximum: int = 420) -> None:
     apply_sort=getattr(tree,'_reqm_apply_sort',None)
     if apply_sort:
         apply_sort()
-    font = tkfont.nametofont("TkDefaultFont")
-    heading_font = tkfont.nametofont("TkHeadingFont")
+    font = tkfont.nametofont("TkDefaultFont",root=tree._root())
+    heading_font = tkfont.nametofont("TkHeadingFont",root=tree._root())
     for column in tree["columns"]:
         manual=getattr(tree,'_reqm_manual_widths',{})
         if column in manual:

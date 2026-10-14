@@ -24,7 +24,7 @@ from .files import (
 from .service import Operations
 from .ui_helpers import (
     autosize_tree, bind_desktop_drag, bind_tree_sorting, bind_tree_column_resize, bind_wide_combobox, filter_combobox_choices,
-    post_combobox, search_suggestions, hide_combobox_popups, format_money,
+    post_combobox, search_suggestions, hide_combobox_popups, format_money, after_latest, scrollable_form,
 )
 from .profiles import (
     PROFILE_PRESETS, SALES_CHANNELS, MATCHING_CHANNELS, SMARTSTORE_ERP_MAPPING,
@@ -35,7 +35,7 @@ from .shipping import compact
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.48'
+APP_VERSION = '1.9.49'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -122,7 +122,7 @@ class Desktop:
         icon_file = asset_path('branding', 'rq_mark_64.png')
         if icon_file.exists():
             try:
-                self.app_icon = tk.PhotoImage(file=str(icon_file))
+                self.app_icon = tk.PhotoImage(master=root,file=str(icon_file))
                 root.iconphoto(True, self.app_icon)
             except tk.TclError:
                 self.app_icon = None
@@ -172,7 +172,7 @@ class Desktop:
         self.sidebar_logo = None
         sidebar_logo_file = asset_path('branding', 'rq_mark_40.png')
         if sidebar_logo_file.exists():
-            try:self.sidebar_logo = tk.PhotoImage(file=str(sidebar_logo_file))
+            try:self.sidebar_logo = tk.PhotoImage(master=root,file=str(sidebar_logo_file))
             except tk.TclError:pass
         if self.sidebar_logo:
             tk.Label(logo,image=self.sidebar_logo,bg='#FFFFFF',borderwidth=0).pack(side='left')
@@ -506,7 +506,7 @@ class Desktop:
         self.button(history_filters,'전체 이력',self.show_all_history,style='Quiet.TButton')
         ttk.Label(history_filters,text='검색').pack(side='left',padx=(14,5))
         ttk.Entry(history_filters,textvariable=self.history_search,width=34).pack(side='left')
-        self.history_search.trace_add('write',lambda *_:self.refresh_history())
+        self.history_search.trace_add('write',lambda *_:after_latest(self.root,'history-search',self.refresh_history))
         line = ttk.Frame(history_frame); line.pack(fill='x',pady=8)
         self.button(line,'선택 파일 재저장',self.reexport)
         self.button(line,'현재 정보로 ERP 재생성',self.download_erp_again,style='Quiet.TButton')
@@ -824,7 +824,7 @@ class Desktop:
             self.tray_icon = None
 
     def on_search_changed(self,*_):
-        self.refresh_orders();self.update_search_suggestions()
+        after_latest(self.root,'order-search',lambda:(self.refresh_orders(),self.update_search_suggestions()))
 
     def update_search_suggestions(self):
         if not hasattr(self,'search_suggestion_bar'):
@@ -869,8 +869,10 @@ class Desktop:
         self.matching_sites.pack(fill='both',expand=True)
         self.matching_sites.bind('<<ListboxSelect>>',self.load_matching_profile)
 
-        right = ttk.Frame(body,padding=(8,0,0,0))
-        right.pack(side='left',fill='both',expand=True)
+        right_shell=ttk.Frame(body,padding=(8,0,0,0))
+        right_shell.pack(side='left',fill='both',expand=True)
+        ttk.Label(right_shell,text='오른쪽·아래 스크롤바를 드래그하거나 마우스 휠로 전체 항목을 확인하세요.',foreground='#64748B').pack(anchor='w',pady=(0,5))
+        right=self.matching_form=scrollable_form(right_shell)
         identity = ttk.LabelFrame(right,text='01  파일 인식 기준',padding=13)
         identity.pack(fill='x')
         self.matching_channel = tk.StringVar(value=MATCHING_CHANNELS[0])
@@ -1018,15 +1020,12 @@ class Desktop:
         if event.keysym in ('Up','Down','Left','Right','Return','Escape','Tab'):
             return
         query = box.get()
-        try: cursor = box.index('insert')
-        except tk.TclError: cursor = len(query)
         def update():
             if box.get() != query:
                 return
             choices = related_column_choices(field, getattr(self,'mapping_choice_values',EMPTY_COLUMN_CHOICES), query)
             post_combobox(box,choices or ['미사용'])
-            box.icursor(min(cursor,len(query)))
-        box.after_idle(update)
+        after_latest(box,'suggestions',update)
 
     def select_all_text(self, event):
         event.widget.after_idle(lambda:event.widget.selection_range(0,'end'))
@@ -1571,12 +1570,11 @@ class Desktop:
                     widget.bind('<<ComboboxSelected>>',chosen)
                     def search_catalog(event,widget=widget,choices=choices):
                         if event.keysym in ('Up','Down','Left','Right','Return','Escape','Tab'): return
-                        query=widget.get();cursor=widget.index('insert')
+                        query=widget.get()
                         def update():
                             if widget.get()!=query:return
                             post_combobox(widget,filter_combobox_choices(query,choices))
-                            widget.icursor(min(cursor,len(query)))
-                        widget.after_idle(update)
+                        after_latest(widget,'suggestions',update)
                     widget.bind('<KeyRelease>',search_catalog)
                     widget.bind('<Double-1>',self.select_all_text)
                     bind_wide_combobox(widget)
@@ -1664,12 +1662,11 @@ class Desktop:
                         variables['logistics_code'].set(value);variables['name'].set(self.service.item_name(value))
                     def search(event,widget=widget,choices=choices):
                         if event.keysym in ('Up','Down','Left','Right','Return','Escape','Tab'):return
-                        query=widget.get();cursor=widget.index('insert')
+                        query=widget.get()
                         def update():
                             if widget.get()!=query:return
                             post_combobox(widget,filter_combobox_choices(query,choices))
-                            widget.icursor(min(cursor,len(query)))
-                        widget.after_idle(update)
+                        after_latest(widget,'suggestions',update)
                     widget.bind('<<ComboboxSelected>>',chosen);widget.bind('<KeyRelease>',search);widget.bind('<Double-1>',self.select_all_text);bind_wide_combobox(widget)
                 else:
                     widget=ttk.Entry(component_box,textvariable=variables[field],width=widths[column]);widget.bind('<Double-1>',self.select_all_text)
@@ -2013,12 +2010,11 @@ class Desktop:
                     widget.bind('<<ComboboxSelected>>',chosen)
                     def search_catalog(event,widget=widget,choices=choices):
                         if event.keysym in ('Up','Down','Left','Right','Return','Escape','Tab'):return
-                        query=widget.get();cursor=widget.index('insert')
+                        query=widget.get()
                         def update():
                             if widget.get()!=query:return
                             post_combobox(widget,filter_combobox_choices(query,choices))
-                            widget.icursor(min(cursor,len(query)))
-                        widget.after_idle(update)
+                        after_latest(widget,'suggestions',update)
                     widget.bind('<KeyRelease>',search_catalog)
                     bind_wide_combobox(widget)
                 else:
@@ -2292,12 +2288,11 @@ class Desktop:
                     widget.bind('<<ComboboxSelected>>',chosen)
                     def search_catalog(event,widget=widget,choices=choices):
                         if event.keysym in ('Up','Down','Left','Right','Return','Escape','Tab'):return
-                        query=widget.get();cursor=widget.index('insert')
+                        query=widget.get()
                         def update():
                             if widget.get()!=query:return
                             post_combobox(widget,filter_combobox_choices(query,choices))
-                            widget.icursor(min(cursor,len(query)))
-                        widget.after_idle(update)
+                        after_latest(widget,'suggestions',update)
                     widget.bind('<KeyRelease>',search_catalog)
                     bind_wide_combobox(widget)
                 else:
