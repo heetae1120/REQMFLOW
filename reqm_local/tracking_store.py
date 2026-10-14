@@ -177,22 +177,16 @@ class TrackingOperations:
 
     def export_wekeep_jobs(self,job_ids,path,with_tracking=False,confirmed_only=False):
         from .files import wekeep_workbook_bytes
-        from .output_names import without_brand_prefix
         entries=[r for job in dict.fromkeys(job_ids) for r in self.active_tracking_rows(job)]
         if confirmed_only:
             entries=[r for r in entries if r['state']=='confirmed']
         if not entries:
             raise ValueError('다운로드할 출고요청이 없습니다.')
         values=[]
+        name_orders=self.tracking_name_orders()
         for row in entries:
             d=dict(row['data'])
-            line=self.db.execute('''SELECT o.components,r.component FROM request_lines r
-                JOIN orders o ON o.id=r.order_id WHERE r.id=?''',
-                (d.get('_request_line_id'),)).fetchone()
-            if line:
-                d['product']=self.wekeep_output_name(json.loads(line['components'])[line['component']])
-            else:
-                d['product']=without_brand_prefix(d.get('product'))
+            d['product']=self.tracking_output_name(row,name_orders)
             values.append([identity(d.get(k)).removeprefix('리큐엠_') if k=='channel' else identity(d.get(k)) for k in ('order_no','channel','product','quantity','recipient','phone','postcode','address','memo')]+
                 [row['tracking'] if with_tracking and row['state']=='confirmed' else ''])
         Path(path).write_bytes(wekeep_workbook_bytes(values))
@@ -368,6 +362,46 @@ class TrackingOperations:
                                 ('confirmed', tracking, detail, now(), self.tracking_actor(), rid))
             self.event('송장 확정', f'작업 {job_id}, {len(row_ids)}행, 사유 {reason}')
 
+    def tracking_name_orders(self):
+        result={}
+        for row in self.db.execute('SELECT data,components FROM orders'):
+            data=json.loads(row['data'])
+            key=tuple(identity(data.get(k)) for k in ('channel','account','order_no'))
+            result.setdefault(key,[]).append((data,json.loads(row['components'])))
+        return result
+
+    def tracking_output_name(self, row, name_orders=None):
+        """Resolve display names without modifying stored orders or invoice evidence."""
+        from .output_names import without_brand_prefix
+        from .tracking import compact
+        d=row['data']
+        line=self.db.execute('''SELECT o.components,r.component FROM request_lines r
+            JOIN orders o ON o.id=r.order_id WHERE r.id=?''',
+            (d.get('_request_line_id'),)).fetchone()
+        if line:
+            components=json.loads(line['components'])
+            if 0 <= line['component'] < len(components):
+                return self.wekeep_output_name(components[line['component']])
+        candidates=[]
+        original=d.get('_original_data',d)
+        if name_orders is None:name_orders=self.tracking_name_orders()
+        key=tuple(identity(original.get(k)) for k in ('channel','account','order_no'))
+        for data,components in name_orders.get(key,[]) if original.get('order_no') else []:
+            # A shared line number can identify multiple colours; never skip option checks.
+            if any(compact(data.get(k))!=compact(original.get(k)) for k in ('product','option')):
+                continue
+            if original.get('line_no') and identity(data.get('line_no'))!=identity(original['line_no']):
+                continue
+            candidates.append(components)
+        if len(candidates)==1 and candidates[0]:
+            components=candidates[0]
+            if len(components)==1:
+                return self.wekeep_output_name(components[0])
+            return ' / '.join(f"{self.wekeep_output_name(c)} × {c['quantity']}개" for c in components)
+        product=without_brand_prefix(original.get('product'))
+        option=identity(original.get('option'))
+        return product + (f' · {option}' if option and compact(option) not in compact(product) else '')
+
     def export_tracking(self, job_id, path, confirmed_only=False):
         job_ids = [job_id] if isinstance(job_id, str) else list(dict.fromkeys(job_id))
         entries = [r for jid in job_ids for r in self.tracking_rows(jid)]
@@ -378,8 +412,9 @@ class TrackingOperations:
             raise ValueError('확정된 송장 주문이 없습니다.')
         # Preserve the Shipping program's eleven-column layout, invoice at J.
         values = []
+        name_orders=self.tracking_name_orders()
         for index, row in enumerate(rows, 1):
-            d = row['data']
+            d = {**row['data'], 'product':self.tracking_output_name(row,name_orders)}
             values.append([identity(d.get(k)) for k in ('order_no', 'channel', 'product', 'quantity',
                            'recipient', 'phone', 'postcode', 'address', 'memo')] +
                           [row['tracking'] if row['state'] == 'confirmed' else '', str(index)])
