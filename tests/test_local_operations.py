@@ -37,6 +37,25 @@ HEADERS=['주문번호','상품주문번호','상품명','옵션정보','수량'
 
 
 class LocalTests(unittest.TestCase):
+    def test_eri_net_amount_precedes_set_allocation_and_is_idempotent(self):
+        data={'channel':'이알아이','amount':'42900','quantity':'1'}
+        self.s._apply_channel_amount_rule(data)
+        self.assertEqual(data['amount'],'27885')
+        self.assertEqual(data['channel_gross_amount'],'42900')
+        self.s._apply_channel_amount_rule(data)
+        self.assertEqual(data['amount'],'27885')
+        from unittest.mock import patch
+        with patch.object(self.s, '_attach_wekeep_skus', side_effect=lambda data, result: (result, '')):
+            components, issue=self.s._build_components(data,[
+                {'code':'MAIN','unit_amount':'0'}, {'code':'CASE','unit_amount':'5000'}])
+        self.assertEqual(issue,'')
+        self.assertEqual([Decimal(c['amount']) for c in components],[Decimal('22885'),Decimal('5000')])
+
+    def test_channel_amount_rule_leaves_other_channels_unchanged(self):
+        data={'channel':'오늘의집','amount':'42900'}
+        self.assertEqual(self.s._apply_channel_amount_rule(data),data)
+        self.assertEqual(data,{'channel':'오늘의집','amount':'42900'})
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.folder=Path(self.temp.name)
         self.s=Operations(self.folder/'data',REFERENCE)
@@ -445,7 +464,7 @@ class LocalTests(unittest.TestCase):
         for name in ('first.xlsx','second.xlsx'):
             book=load_workbook(self.folder/name,data_only=True)
             total+=sum(r[15]*r[16] for r in list(book.active.values)[1:]);book.close()
-        self.assertEqual(total,13001)
+        self.assertEqual(total,10001)  # 오늘의집 총 결제금액에는 배송비가 포함된다.
         self.s.mark_registered(batch);self.s.reexport(batch,self.folder/'again.xlsx')
         self.assertEqual((self.folder/'again.xlsx').read_bytes(),(self.folder/'second.xlsx').read_bytes())
 
@@ -1068,7 +1087,7 @@ class LocalTests(unittest.TestCase):
         self.assertEqual([item['code'] for item in imported_order['components']],['EVENT-A','EVENT-GIFT'])
         self.s.clear_event_rule(order['id'])
         reverted=next(item for item in self.s.orders() if item['data']['line_no']=='EVENT-1')['data']
-        self.assertEqual((reverted['product'],reverted['option'],reverted['amount']),('행사 전 상품','기본','12000'))
+        self.assertEqual((reverted['product'],reverted['option'],reverted['amount']),('행사 전 상품','기본','9000'))
         self.assertNotIn('event_name',reverted)
 
     def test_old_event_rule_schema_adds_component_storage(self):
