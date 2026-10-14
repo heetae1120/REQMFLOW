@@ -177,6 +177,7 @@ class Operations(TrackingOperations, VoucherOperations):
         self.remember_confirmed_smartstore_splits()
         self.backfill_legacy_smartstore_matches()
         self.confirm_existing_smartstore_matches()
+        self.apply_pending_channel_amount_rules()
         self.remember_confirmed_smartstore_splits()
         self._assume_pending_requests_shipped()
         self.db.commit()
@@ -453,7 +454,7 @@ class Operations(TrackingOperations, VoucherOperations):
         return (
             data.get('source_product', data.get('product', '')),
             data.get('source_option', data.get('option', '')),
-            data.get('source_amount', data.get('amount', '')),
+            data.get('source_amount', data.get('ohou_payment_total', data.get('channel_gross_amount', data.get('amount', '')))),
         )
 
     def _apply_event_rule(self, data):
@@ -469,6 +470,8 @@ class Operations(TrackingOperations, VoucherOperations):
         data['event_name'], data['event_rule_id'] = rule['name'], rule['id']
         data['event_unit_amount'] = rule['target_amount']
         data['event_components'] = json.loads(rule['components'] or '[]')
+        if rule['target_amount']:
+            data['amount_missing'] = False
         return data
 
     def _validate_component_definitions(self, components, channel=''):
@@ -614,7 +617,63 @@ class Operations(TrackingOperations, VoucherOperations):
         ]
         return self._build_components(data, definitions)
 
+    @staticmethod
+    def _apply_ohou_shipping_rule(data, shipping=None):
+        if display_channel(data.get('channel', '')) != '오늘의집':
+            return data
+        current = number(data.get('amount') or '0')
+        previous = data.get('ohou_product_amount')
+        total = number(data['ohou_payment_total']) if previous is not None and current == number(previous) else current
+        fee = money(data.get('shipping')) if shipping is None else money(shipping)
+        deducted = fee if data.get('ohou_shipping_owner', True) else Decimal('0')
+        if deducted > total:
+            raise ValueError('오늘의집 배송비가 총 결제금액보다 큽니다. 금액과 배송비를 확인하세요.')
+        data['ohou_payment_total'] = str(total)
+        data['ohou_shipping_deducted'] = str(deducted)
+        data['amount'] = str(total - deducted)
+        data['ohou_product_amount'] = data['amount']
+        return data
+
+    def _apply_order_amount_rule(self, data):
+        if display_channel(data.get('channel', '')) == '오늘의집':
+            # The order fee is emitted once. Deduct it from one source item only.
+            key = self.erp_fee_key(data)
+            siblings = [json.loads(row[0]) for row in self.db.execute('SELECT data FROM orders')]
+            owner_exists = any(self.erp_fee_key(other) == key
+                and other.get('line_no') != data.get('line_no')
+                and number(other.get('ohou_shipping_deducted') or '0') > 0 for other in siblings)
+            data['ohou_shipping_owner'] = not owner_exists
+            if data.get('event_unit_amount'):
+                # An operator-entered event unit price is already a product price.
+                fee = self.voucher_fee(data) if not owner_exists else Decimal('0')
+                data['ohou_payment_total'] = str(number(data.get('amount') or '0') + fee)
+                data['ohou_product_amount'] = str(number(data.get('amount') or '0'))
+            self._apply_ohou_shipping_rule(data, self.voucher_fee(data))
+        return self._apply_channel_amount_rule(data)
+
+    @staticmethod
+    def _apply_channel_amount_rule(data):
+        if (display_channel(data.get('channel', '')) == '에이블리'
+                and number(data.get('amount') or '0') == 0
+                and 'column_matches' in data and 'amount' not in data['column_matches']
+                and not data.get('event_unit_amount')):
+            data['amount_missing'] = True
+        if display_channel(data.get('channel', '')) != '이알아이':
+            return data
+        current = number(data.get('amount') or '0')
+        applied = data.get('channel_net_amount')
+        if applied is not None and current == number(applied):
+            return data
+        data['channel_gross_amount'] = str(current)
+        data['channel_amount_multiplier'] = '0.65'
+        data['amount'] = str((current * Decimal('0.65')).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+        data['channel_net_amount'] = data['amount']
+        return data
+
     def match(self, data):
+        self._apply_order_amount_rule(data)
+        if data.get('amount_missing'):
+            return [], '판매처 금액 누락: 품목별 금액 확인 필요 (0원으로 전표 생성 불가)'
         if any(word in data['status'] for word in ('취소', '반품', '교환')):
             return [], '취소·반품·교환 주문: 출고 보류'
         if not all(data[k] for k in ('recipient', 'phone', 'address', 'postcode')):
@@ -675,6 +734,7 @@ class Operations(TrackingOperations, VoucherOperations):
                     data[field] = data.get(field, '')
                 data = self._normalize_delivery(data)
                 data = self._apply_event_rule(data)
+                data = self._apply_order_amount_rule(data)
                 data['quantity'] = str(quantity(data['quantity']))
                 data['amount'] = str(number(data['amount']))
                 data['shipping'] = str(money(data['shipping']))
@@ -873,13 +933,32 @@ class Operations(TrackingOperations, VoucherOperations):
             self.event('강제 출고 승인' if approved else '강제 출고 승인 해제',f'{len(rows)}건'+(f' / {reason}' if approved else ''))
         return len(rows)
 
+    def apply_pending_channel_amount_rules(self):
+        with self.db:
+            for order in self.orders():
+                data = order['data']
+                if order['state'] not in ('검토 필요','출고 준비') or order['request_days']:
+                    continue
+                before = encode(data)
+                try:
+                    self._apply_order_amount_rule(data)
+                except ValueError as exc:
+                    self.db.execute('UPDATE orders SET components=?,state=?,issue=? WHERE id=?',
+                        ('[]','검토 필요',str(exc),order['id']))
+                    continue
+                if encode(data) == before:
+                    continue
+                components, issue = self.match(data)
+                self.db.execute('UPDATE orders SET data=?,components=?,state=?,issue=? WHERE id=?',
+                    (encode(data),encode(components),'검토 필요' if issue else '출고 준비',issue,order['id']))
+
     def refresh_matches(self):
         with self.db:
             for order in self.orders():
                 if order['state'] not in ('검토 필요','출고 준비'):continue
                 components,issue=self.match(order['data'])
-                self.db.execute('UPDATE orders SET components=?,state=?,issue=? WHERE id=?',
-                    (encode(components),'검토 필요' if issue else '출고 준비',issue,order['id']))
+                self.db.execute('UPDATE orders SET data=?,components=?,state=?,issue=? WHERE id=?',
+                    (encode(order['data']),encode(components),'검토 필요' if issue else '출고 준비',issue,order['id']))
 
     def orders(self):
         orders = [{**dict(row), 'data':json.loads(row['data']), 'components':json.loads(row['components'])}
@@ -936,6 +1015,8 @@ class Operations(TrackingOperations, VoucherOperations):
                 current['option'] = rule['target_option'] or current_option
                 current['amount'] = str(number(rule['target_amount']) * quantity(current['quantity'])) if rule['target_amount'] else current_amount
                 current['event_name'], current['event_rule_id'] = rule['name'], rule_id
+                if rule['target_amount']:
+                    current['amount_missing'] = False
                 current['event_unit_amount'] = rule['target_amount']
                 current['event_components'] = json.loads(rule['components'] or '[]')
                 matched, issue = self.match(current)
@@ -1071,7 +1152,7 @@ class Operations(TrackingOperations, VoucherOperations):
             for order in self.orders():
                 if order['state'] in ('검토 필요', '출고 준비') and self.mapping_key(order['data']) == key:
                     matched, issue = self.match(order['data'])
-                    self.db.execute('UPDATE orders SET components=?,state=?,issue=? WHERE id=?', (encode(matched), '검토 필요' if issue else '출고 준비', issue, order['id']))
+                    self.db.execute('UPDATE orders SET data=?,components=?,state=?,issue=? WHERE id=?', (encode(order['data']), encode(matched), '검토 필요' if issue else '출고 준비', issue, order['id']))
             self.event('매칭 저장', order_id)
         if customer:
             self.settings.setdefault('channel_customer_codes',{})[data['channel']] = customer

@@ -557,6 +557,8 @@ def parse_orders(path, profiles, channel_override=None):
             values = [_numeric_text(get([name])) for name in names]
             if any(values):
                 entry[field] = _numeric_text(sum(Decimal(value or '0') for value in values))
+        if profile.get('channel') == '에이블리':
+            entry['amount_missing'] = not bool(entry['amount'] and _numeric_text(entry['amount']))
         if profile.get('amount_is_unit') and entry['amount'] and entry['quantity']:
             amount = _numeric_text(entry['amount'])
             qty = _numeric_text(entry['quantity'])

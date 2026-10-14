@@ -152,6 +152,8 @@ class VoucherOperations:
         if len({family for family, _ in parts}) != len(parts):
             return None
         identity = [display_channel(row['channel']), row['data'].get('account', ''), sorted(parts)]
+        if display_channel(row['channel']) == '오늘의집':
+            identity.append(['배송비 차감', str(Fraction(str(row['data'].get('ohou_shipping_deducted') or '0')) / count)])
         if total is not None:
             identity.append(str(Fraction(str(total)) / count))
         digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
@@ -334,9 +336,50 @@ class VoucherOperations:
         if self.db.execute('SELECT 1 FROM fees WHERE bundle IN (?,?)', (key, self.bundle_key(data))).fetchone():
             raise ValueError('이미 전표에 반영한 배송비는 변경할 수 없습니다.')
         with self.db:
+            from .service import display_channel
+            if display_channel(data.get('channel', '')) == '오늘의집':
+                self._update_ohou_shipping_amounts(data, won(amount))
             self.db.execute('INSERT OR REPLACE INTO mappings VALUES(?,?)',
                             (PREFIX + 'fee:' + key, json.dumps([str(won(amount))])))
             self.event('전표 배송비 확정', key)
+
+    def _update_ohou_shipping_amounts(self, data, amount):
+        from .service import encode, number
+        key = self.erp_fee_key(data)
+        orders = [o for o in self.orders() if self.erp_fee_key(o['data']) == key]
+        orders.sort(key=lambda o: (not bool(number(o['data'].get('ohou_shipping_deducted') or '0')), o['data'].get('source_row', 0), o['id']))
+        for index, order in enumerate(orders):
+            current = order['data']
+            old = number(current.get('amount') or '0')
+            current['ohou_shipping_owner'] = index == 0
+            self._apply_ohou_shipping_rule(current, amount)
+            delta = number(current['amount']) - old
+            components = order['components']
+            if components and delta:
+                main = number(components[0]['amount']) + delta
+                if main < 0:
+                    raise ValueError('오늘의집 배송비 차감 후 본품 금액이 음수입니다. 세트 배분을 확인하세요.')
+                components[0]['amount'] = str(main)
+                shipped = self.db.execute('''SELECT s.id,s.qty,s.erp_amount,s.erp_id FROM shipments s
+                    JOIN request_lines r ON r.id=s.line_id WHERE r.order_id=? AND r.component=0 ORDER BY s.rowid''',
+                    (order['id'],)).fetchall()
+                if any(s['erp_id'] for s in shipped):
+                    raise ValueError('이미 전표에 반영한 오늘의집 상품금액은 변경할 수 없습니다.')
+                if shipped:
+                    q = sum(s['qty'] for s in shipped)
+                    if q != int(current['quantity']):
+                        raise ValueError('오늘의집 부분 출고 주문은 상품금액 배분을 확인한 뒤 배송비를 확정하세요.')
+                    remaining = delta
+                    for pos, shipment in enumerate(shipped):
+                        change = remaining if pos == len(shipped)-1 else won(delta * Decimal(shipment['qty']) / Decimal(q))
+                        adjusted = number(shipment['erp_amount'] or '0') + change
+                        if adjusted < 0:
+                            raise ValueError('배송비 차감 후 출고 상품금액이 음수입니다. 금액 배분을 확인하세요.')
+                        self.db.execute('UPDATE shipments SET erp_amount=? WHERE id=?',
+                            (str(adjusted),shipment['id']))
+                        remaining -= change
+            self.db.execute('UPDATE orders SET data=?,components=? WHERE id=?',
+                            (encode(current),encode(components),order['id']))
 
     def append_voucher_fees(self, sources, append, batch, regenerate=False, preview=False):
         groups = {}
