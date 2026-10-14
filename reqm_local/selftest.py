@@ -54,7 +54,9 @@ def run(folder):
         assert tuple(app.voucher_panel.tree['columns']) == ('출고일','판매처','품목코드','품목명','수량','상품금액','상태')
         assert root.title().startswith('REQM FLOW')
         assert app.cloud_status.get() == '로컬 DB 저장'
-        assert [app.workspace_tabs.tab(tab,'text') for tab in app.workspace_tabs.tabs()] == ['주문 · 출고요청','실제출고','출력 이력','설정 · 백업']
+        assert [app.workspace_tabs.tab(tab,'text') for tab in app.workspace_tabs.tabs()] == ['주문 · 출고요청','실제출고','설정 · 백업']
+        assert [app.result_tabs.tab(tab,'text') for tab in app.result_tabs.tabs()] == ['1  출고·정산 자료 입력','2  품목·금액 매칭','3  전표 검수·ERP 생성','4  출력 이력']
+        assert app.result_tabs.select() == str(app.workflow_frames[0])
         assert [app.settings_tabs.tab(tab,'text') for tab in app.settings_tabs.tabs()] == ['설정 · 백업','매칭 설정','주문 수집']
         assert app.workspace_tabs.select() == str(app.order_frame)
 

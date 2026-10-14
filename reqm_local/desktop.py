@@ -11,7 +11,7 @@ import ctypes
 import calendar
 import tkinter.font as tkfont
 from difflib import SequenceMatcher
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from tkinter import ttk, filedialog, messagebox, simpledialog
@@ -35,7 +35,7 @@ from .shipping import compact
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.45'
+APP_VERSION = '1.9.46'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -218,9 +218,8 @@ class Desktop:
         self.workspace_tabs = tabs
         self.order_frame = ttk.Frame(tabs,padding=12)
         result_frame = ttk.Frame(tabs,padding=16)
-        history_frame = ttk.Frame(tabs,padding=12)
         settings_page = ttk.Frame(tabs,padding=8)
-        for frame,title in [(self.order_frame,'주문 · 출고요청'),(result_frame,'실제출고'),(history_frame,'출력 이력'),(settings_page,'설정 · 백업')]:
+        for frame,title in [(self.order_frame,'주문 · 출고요청'),(result_frame,'실제출고'),(settings_page,'설정 · 백업')]:
             tabs.add(frame,text=title)
         self.settings_tabs = ttk.Notebook(settings_page,style='Workspace.TNotebook')
         self.settings_tabs.pack(fill='both',expand=True)
@@ -231,7 +230,7 @@ class Desktop:
             self.settings_tabs.add(frame,text=title)
         from .closed_mall_ui import ClosedMallPanel
         self.closed_mall_panel = ClosedMallPanel(login_frame,self.root)
-        nav_items = [('▣  주문 · 출고요청',0),('↗  실제출고',1),('◫  출력 이력',2),('⚙  설정 · 백업',3)]
+        nav_items = [('▣  주문 · 출고요청',0),('↗  실제출고',1),('⚙  설정 · 백업',2)]
         self.nav_buttons = []
         def select_page(index):
             tabs.select(index)
@@ -360,31 +359,56 @@ class Desktop:
         self.table.bind('<<TreeviewSelect>>',self.show_detail)
         self.table.bind('<Double-1>',self.open_mapping_from_click)
         result_tabs = ttk.Notebook(result_frame,style='Workspace.TNotebook')
+        self.result_tabs = result_tabs
+        self.result_frame = result_frame
         result_tabs.pack(fill='both',expand=True)
+        source_frame=ttk.Frame(result_tabs,padding=12)
+        amount_step=ttk.Frame(result_tabs,padding=12)
         voucher_frame=ttk.Frame(result_tabs,padding=12)
-        result_tabs.add(voucher_frame,text='전표 작업표')
+        history_frame=ttk.Frame(result_tabs,padding=12)
+        self.workflow_frames=[source_frame,amount_step,voucher_frame,history_frame]
+        self.workflow_titles=['1  출고·정산 자료 입력','2  품목·금액 매칭','3  전표 검수·ERP 생성','4  출력 이력']
+        self.workflow_statuses=[tk.StringVar() for _ in self.workflow_frames]
+        descriptions=[
+            '일반 판매처는 FLOW에 입력한 주문의 출고 내역을 불러옵니다. 스마트스토어는 출고·구매확정 파일을 직접 입력합니다.',
+            '미매칭 품목을 연결하고 세트 구성품별 금액을 확정합니다. 확인할 항목이 없으면 다음 단계로 이동하세요.',
+            '상품금액·배송비·금액 차이를 최종 확인한 뒤 이 화면에서 ERP 파일을 생성합니다.',
+            '생성한 파일을 다시 내려받고 이카운트 등록 여부를 관리합니다.',
+        ]
+        for index,(frame,title,description) in enumerate(zip(self.workflow_frames,self.workflow_titles,descriptions)):
+            result_tabs.add(frame,text=title)
+            self.workflow_header(frame,index,title,description)
+        self.erp_include_esm = tk.BooleanVar(value=True)
         from .voucher_ui import VoucherPanel
         self.voucher_panel=VoucherPanel(self,voucher_frame)
-        result_input = ttk.Frame(result_tabs,padding=20)
-        amount_frame = ttk.Frame(result_tabs,padding=20)
-        esm_frame = ttk.Frame(result_tabs,padding=20)
-        erp_frame = ttk.Frame(result_tabs,padding=20)
+        self.erp_from=self.voucher_panel.start
+        self.through=self.voucher_panel.end
+        self.voucher=self.voucher_panel.voucher_day
+        self.source_tabs=ttk.Notebook(source_frame)
+        self.source_tabs.pack(fill='both',expand=True)
+        result_input = ttk.Frame(self.source_tabs,padding=12)
+        smartstore_frame=ttk.Frame(self.source_tabs,padding=12)
+        esm_frame = ttk.Frame(self.source_tabs,padding=12)
+        tracking_frame = ttk.Frame(self.source_tabs,padding=8)
+        self.smartstore_source_frame=smartstore_frame
+        for frame,title in [(result_input,'FLOW 일반 판매처'),(smartstore_frame,'스마트스토어 직접 입력'),(esm_frame,'옥션·지마켓 자료'),(tracking_frame,'위킵 송장 반영')]:
+            self.source_tabs.add(frame,text=title)
+        self.matching_tabs=ttk.Notebook(amount_step)
+        self.matching_tabs.pack(fill='both',expand=True)
+        amount_frame=ttk.Frame(self.matching_tabs,padding=12)
+        esm_matching_frame=ttk.Frame(self.matching_tabs,padding=12)
+        self.matching_tabs.add(amount_frame,text='일반 판매처·스마트스토어')
+        self.matching_tabs.add(esm_matching_frame,text='옥션·지마켓')
         self.erp_ship_from = tk.StringVar(value=date.today().isoformat())
         self.erp_ship_through = tk.StringVar(value=date.today().isoformat())
         self.erp_ship_customer = tk.StringVar(value='전체 거래처')
         self.erp_ship_day = tk.StringVar(value=date.today().isoformat())
         self.erp_amount_from = tk.StringVar(value=date.today().isoformat())
         self.erp_amount_through = tk.StringVar(value=date.today().isoformat())
-        result_tabs.add(result_input,text='1  출고건 확인')
-        result_tabs.add(amount_frame,text='2  금액 매칭 및 세트 분리')
-        result_tabs.add(esm_frame,text='2-1  옥션/지마켓 ERP전환')
-        result_tabs.add(erp_frame,text='3  ERP 파일 생성 및 다운로드')
-        tracking_frame = ttk.Frame(result_tabs,padding=8)
-        result_tabs.add(tracking_frame,text='4  위킵 송장 가져오기')
         from .tracking_ui import TrackingPanel
         self.tracking_panel = TrackingPanel(self,tracking_frame)
-        ttk.Label(result_input,text='당일 출고건 확인',font=(self.font_family,18,'bold')).pack(anchor='w')
-        ttk.Label(result_input,text='선택한 날짜의 출고건을 불러온 뒤, 이번 ERP Excel에 적용할 창고와 품목만 변경할 수 있습니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
+        ttk.Label(result_input,text='FLOW 일반 판매처 출고 내역',font=(self.font_family,16,'bold')).pack(anchor='w')
+        ttk.Label(result_input,text='입력한 판매처 엑셀과 연결된 출고 내역을 사용합니다. 주문 원본을 다시 넣을 필요가 없습니다.',foreground='#64748B').pack(anchor='w',pady=(4,12))
         confirmed_line=ttk.Frame(result_input);confirmed_line.pack(fill='x',pady=(0,10))
         ttk.Label(confirmed_line,text='조회 기간').pack(side='left')
         self.date_picker(confirmed_line,self.erp_ship_from,'실제 출고 조회 시작일').pack(side='left',padx=6)
@@ -397,17 +421,29 @@ class Desktop:
         self.erp_ship_customer_box.pack(side='left',padx=(0,6))
         self.erp_ship_customer_box.bind('<<ComboboxSelected>>',lambda _event:self.safe(self.refresh_confirmed_shipments))
         self.button(confirmed_line,'기간 조회',self.refresh_actual_erp_day,style='Accent.TButton')
-        result_card = ttk.LabelFrame(result_input,text='입력 파일',padding=18)
+        result_card = ttk.LabelFrame(result_input,text='출고 자료 준비',padding=12)
         result_card.pack(fill='x')
-        ttk.Label(result_card,text='일반 판매처는 출고요청 기준으로 불러오며, 스마트스토어는 전용 파일을 입력합니다.',foreground='#64748B').pack(anchor='w',pady=(0,12))
+        ttk.Label(result_card,text='출고요청에 반영된 품목·수량·금액·배송비를 가져옵니다. 주문 전체를 바로 전표에 넣지 않습니다.',foreground='#64748B').pack(anchor='w',pady=(0,8))
         result_actions = ttk.Frame(result_card);result_actions.pack(fill='x')
-        self.button(result_actions,'당일 출고건 불러오기',self.auto_results,style='Accent.TButton')
+        self.button(result_actions,'조회 기간 출고건 불러오기',self.auto_results,style='Accent.TButton')
         self.button(result_actions,'출하 창고 변경',self.change_shipment_warehouse,style='Quiet.TButton')
         self.button(result_actions,'품목 변경',self.change_shipment_item,style='Quiet.TButton')
-        self.button(result_actions,'스마트스토어 출고파일',self.smartstore_erp_results,style='Accent.TButton')
-        self.button(result_actions,'구매확정파일 입력',self.smartstore_purchase_results,style='Accent.TButton')
         self.button(result_actions,'선택 주문 삭제',self.delete_confirmed_shipments,style='Danger.TButton')
         self.confirmed_shipments = self.tree(result_input,['구분','출고일','판매처','주문번호','이름','ERP 품목코드','ERP 품목명','출하창고','수량','송장번호'],[125,105,130,150,100,155,240,95,65,140])
+        ttk.Label(smartstore_frame,text='스마트스토어 전표 자료 직접 입력',font=(self.font_family,16,'bold')).pack(anchor='w')
+        ttk.Label(smartstore_frame,text='외부에서 처리한 출고파일·구매확정파일을 입력합니다. 상품주문번호로 연결하고 원본 결제일 기준으로 조회합니다.\n파일 입력은 전표 자료 준비이며 물류 출고요청을 생성하지 않습니다.',foreground='#64748B',wraplength=1050).pack(anchor='w',pady=(4,12))
+        smart_dates=ttk.Frame(smartstore_frame);smart_dates.pack(fill='x',pady=(0,8))
+        ttk.Label(smart_dates,text='조회 기간').pack(side='left')
+        self.date_picker(smart_dates,self.erp_ship_from,'스마트스토어 조회 시작일').pack(side='left',padx=6)
+        self.date_picker(smart_dates,self.erp_ship_through,'스마트스토어 조회 종료일').pack(side='left',padx=6)
+        self.button(smart_dates,'기간 조회',self.refresh_actual_erp_day)
+        smart_actions=ttk.Frame(smartstore_frame);smart_actions.pack(fill='x',pady=(0,10))
+        self.button(smart_actions,'스마트스토어 출고파일 입력',self.smartstore_erp_results,style='Accent.TButton')
+        self.button(smart_actions,'구매확정파일 입력',self.smartstore_purchase_results,style='Accent.TButton')
+        self.button(smart_actions,'출하 창고 변경',self.change_shipment_warehouse,style='Quiet.TButton')
+        self.button(smart_actions,'품목 변경',self.change_shipment_item,style='Quiet.TButton')
+        self.button(smart_actions,'선택 자료 삭제',self.delete_confirmed_shipments,style='Danger.TButton')
+        self.smartstore_inputs=self.tree(smartstore_frame,['구분','기준일','판매처','주문번호','이름','ERP 품목코드','ERP 품목명','출하창고','수량','송장번호'],[125,105,130,150,100,155,240,95,65,140])
         ttk.Label(amount_frame,text='금액 매칭 및 세트 분리',font=(self.font_family,18,'bold')).pack(anchor='w')
         ttk.Label(amount_frame,text='일반 출고의 금액 분리 대상과 스마트스토어 미매칭·세트 주문을 함께 표시합니다.',foreground='#64748B').pack(anchor='w',pady=(4,16))
         amount_line = ttk.Frame(amount_frame); amount_line.pack(fill='x',pady=(0,10))
@@ -444,10 +480,10 @@ class Desktop:
             ttk.Entry(form,textvariable=var,width=22,show='●' if secret else '').pack(side='left')
         self.button(form,'로그인 정보 보호 저장',self.save_esm_login,style='Quiet.TButton')
         self.button(form,'ESM PLUS 자동 다운로드',self.download_esm,style='Accent.TButton')
-        self.button(form,'ESM만 ERP 파일 생성',self.export_esm_erp,style='Accent.TButton')
         self.button(form,'파일 직접 추가',self.import_esm_files,style='Quiet.TButton')
         ttk.Label(esm_card,textvariable=self.esm_progress,foreground='#2563EB').pack(anchor='w',padx=8,pady=(10,0))
-        esm_actions=ttk.Frame(esm_frame);esm_actions.pack(fill='x',pady=(12,8))
+        ttk.Label(esm_frame,text='수집·파일 입력을 마치면 2단계의 옥션·지마켓 탭에서 품목을 확인하세요. ERP 파일은 3단계에서 생성합니다.',wraplength=1050).pack(anchor='w',pady=12)
+        esm_actions=ttk.Frame(esm_matching_frame);esm_actions.pack(fill='x',pady=(12,8))
         ttk.Label(esm_actions,text='변환 내역',font=(self.font_family,11,'bold')).pack(side='left')
         ttk.Label(esm_actions,text='조회 기간').pack(side='left',padx=(14,4))
         self.date_picker(esm_actions,self.esm_view_from,'ESM 조회 시작일').pack(side='left')
@@ -458,27 +494,8 @@ class Desktop:
         self.button(esm_actions,'선택 상품 매칭',self.edit_esm_set,style='Accent.TButton')
         self.button(esm_actions,'선택 주문 삭제',self.delete_esm_entries,style='Danger.TButton')
         self.button(esm_actions,'목록 새로고침',self.refresh_esm_entries,style='Quiet.TButton')
-        self.esm_entries=self.tree(esm_frame,['기준일','판매처','주문번호','상품명','옵션','수량','단가','합계','ERP 품목','상태'],[105,90,145,280,220,65,95,105,170,180])
+        self.esm_entries=self.tree(esm_matching_frame,['기준일','판매처','주문번호','상품명','옵션','수량','단가','합계','ERP 품목','상태'],[105,90,145,280,220,65,95,105,170,180])
         self.esm_entries.bind('<Double-1>',lambda _event:self.safe(self.edit_esm_set))
-        ttk.Label(erp_frame,text='이카운트 ERP 파일 생성 및 다운로드',font=(self.font_family,18,'bold')).pack(anchor='w')
-        ttk.Label(erp_frame,text='출고일 범위의 실제출고·스마트스토어 주문을 만들며, ESM 포함 여부를 선택할 수 있습니다.',foreground='#64748B').pack(anchor='w',pady=(4,18))
-        self.erp_from = tk.StringVar(value=date.today().isoformat())
-        self.through = tk.StringVar(value=date.today().isoformat())
-        self.voucher = tk.StringVar(value=date.today().isoformat())
-        self.erp_include_esm = tk.BooleanVar(value=True)
-        erp_card = ttk.LabelFrame(erp_frame,text='출력 조건',padding=18);erp_card.pack(fill='x')
-        line = ttk.Frame(erp_card); line.pack(anchor='w')
-        ttk.Label(line,text='출고일').pack(side='left',padx=6)
-        self.date_picker(line,self.erp_from,'출고 시작일').pack(side='left')
-        ttk.Label(line,text='~').pack(side='left',padx=5)
-        self.date_picker(line,self.through,'출고 종료일').pack(side='left')
-        ttk.Label(line,text='ERP 전표일').pack(side='left',padx=(14,6))
-        self.date_picker(line,self.voucher,'ERP 전표일').pack(side='left')
-        ttk.Checkbutton(line,text='ESM 포함',variable=self.erp_include_esm).pack(side='left',padx=(14,4))
-        ttk.Button(line,textvariable=self.erp_exclusion_text,command=lambda:self.safe(lambda:self.choose_channel_exclusions('erp'))).pack(side='left',padx=4)
-        self.button(line,'ERP 파일 생성',self.erp,style='Accent.TButton')
-        self.button(line,'현재 정보로 ERP 재다운로드',self.download_erp_again,style='Quiet.TButton')
-        ttk.Label(erp_card,text='이미 생성한 주문은 출력 이력에서 다시 내려받으세요. 배송비는 판매처·계정·주문번호별 첫 전표에 한 번 반영합니다. 부가세 포함·10% 과세 기준입니다.',foreground='#64748B',wraplength=1000).pack(anchor='w',pady=(16,0))
         self.history_day=tk.StringVar(value=date.today().isoformat())
         self.history_show_all=True
         history_filters=ttk.Frame(history_frame);history_filters.pack(fill='x',pady=(0,3))
@@ -492,6 +509,7 @@ class Desktop:
         self.history_search.trace_add('write',lambda *_:self.refresh_history())
         line = ttk.Frame(history_frame); line.pack(fill='x',pady=8)
         self.button(line,'선택 파일 재저장',self.reexport)
+        self.button(line,'현재 정보로 ERP 재생성',self.download_erp_again,style='Quiet.TButton')
         self.button(line,'송장 반영 주문파일 저장',self.export_tracked_order_file,style='Quiet.TButton')
         self.button(line,'비고 수정',self.edit_history_note,style='Quiet.TButton')
         self.button(line,'ERP 등록 확인',self.registered)
@@ -518,6 +536,7 @@ class Desktop:
         ttk.Label(item_actions,text='출고 프로그램에서 사용 중인 품목만 표시합니다. 코드와 품목명은 출고 기준을 따릅니다.',foreground='#64748B').pack(side='left')
         self.item_name_tree=self.tree(item_box,['ERP 품목코드','매칭품목명'],[300,520])
         tk.Label(content,text='LOCAL DATABASE   ·   날짜 YYYY-MM-DD   ·   REQM FLOW',bg='#F4F7FB',fg='#94A3B8',font=(self.font_family,8,'bold'),pady=6).pack(fill='x')
+        self.result_tabs.bind('<<NotebookTabChanged>>',lambda _event:self.safe(self.enter_workflow_step))
         self.refresh()
         self.root.protocol('WM_DELETE_WINDOW',self.hide_to_tray)
         self.root.bind('<Destroy>',self.on_root_destroy,add='+')
@@ -529,6 +548,44 @@ class Desktop:
     @staticmethod
     def exclusion_label(channels):
         return '판매처 제외 없음' if not channels else f'판매처 제외 {len(channels):,}개'
+
+    def workflow_header(self, parent, index, title, description):
+        header=ttk.Frame(parent);header.pack(fill='x',pady=(0,6))
+        ttk.Label(header,text=title,font=(self.font_family,18,'bold')).pack(side='left')
+        if index < 3:
+            ttk.Button(header,text='다음 단계 →',command=lambda:self.safe(lambda:self.select_workflow_step(index+1)),style='Accent.TButton').pack(side='right',padx=4)
+        if index > 0:
+            ttk.Button(header,text='← 이전 단계',command=lambda:self.safe(lambda:self.select_workflow_step(index-1)),style='Quiet.TButton').pack(side='right',padx=4)
+        ttk.Label(parent,text=description,foreground='#64748B',wraplength=1050).pack(anchor='w',pady=(0,4))
+        ttk.Label(parent,textvariable=self.workflow_statuses[index],foreground='#2563EB').pack(anchor='w',pady=(0,10))
+
+    def select_workflow_step(self, index):
+        self.workspace_tabs.select(self.result_frame)
+        self.result_tabs.select(self.workflow_frames[index])
+        self.enter_workflow_step()
+
+    def enter_workflow_step(self):
+        index=self.result_tabs.index(self.result_tabs.select())
+        previous=getattr(self,'_workflow_previous',0)
+        if index == 0:
+            self.refresh_confirmed_shipments()
+        elif index == 1:
+            if previous == 0:
+                self.erp_amount_from.set(self.erp_ship_from.get())
+                self.erp_amount_through.set(self.erp_ship_through.get())
+                self.esm_view_from.set(self.erp_ship_from.get())
+                self.esm_view_through.set(self.erp_ship_through.get())
+                self.esm_show_all=False
+            self.refresh_erp_shipments()
+            self.refresh_esm_entries()
+        elif index == 2:
+            if previous in (0,1):
+                self.voucher_panel.start.set(self.erp_ship_from.get() if previous==0 else self.erp_amount_from.get())
+                self.voucher_panel.end.set(self.erp_ship_through.get() if previous==0 else self.erp_amount_through.get())
+            self.voucher_panel.refresh()
+        else:
+            self.refresh_history()
+        self._workflow_previous=index
 
     def choose_channel_exclusions(self, scope):
         if scope not in ('request','erp'):
@@ -566,6 +623,7 @@ class Desktop:
             else:
                 self.erp_excluded_channels=selected
                 self.erp_exclusion_text.set(self.exclusion_label(selected))
+                self.voucher_panel.refresh()
             win.destroy()
         actions=ttk.Frame(win,padding=14);actions.pack(fill='x')
         self.button(actions,'전체 포함',clear,style='Quiet.TButton')
@@ -1278,6 +1336,7 @@ class Desktop:
             if not all(term in haystack for term in terms):continue
             self.history.insert('', 'end',iid=iid,values=values)
         self.root.after_idle(lambda:autosize_tree(self.history,maximum=360))
+        self.workflow_statuses[3].set(f'조회된 출력 상세 {len(self.history.get_children()):,}행 · 파일 재저장·ERP 등록 확인 가능')
 
     def show_history_day(self):
         date.fromisoformat(self.history_day.get())
@@ -1751,12 +1810,20 @@ class Desktop:
         if path:Path(path).write_bytes(wekeep_workbook_bytes([]))
 
     def auto_results(self):
-        selected_day=self.erp_ship_day.get()
-        new,duplicate=self.service.auto_import_shipments(selected_day,self.erp_excluded_channels);self.refresh()
+        start=date.fromisoformat(self.erp_ship_from.get())
+        end=date.fromisoformat(self.erp_ship_through.get())
+        if start>end:raise ValueError('조회 시작일은 종료일보다 늦을 수 없습니다.')
+        new=duplicate=0
+        selected_day=start
+        while selected_day<=end:
+            added,existing=self.service.auto_import_shipments(selected_day.isoformat(),self.erp_excluded_channels)
+            new+=added;duplicate+=existing
+            selected_day+=timedelta(days=1)
+        self.refresh()
         excluded=', '.join(sorted(self.erp_excluded_channels)) or '없음'
         messagebox.showinfo(
             '자동 반영 완료',
-            f'{selected_day} 출고요청 기준\n실제 출고 {new}행 · 기존 반영 {duplicate}행\n스마트스토어는 자동으로 제외했습니다.\n선택 제외: {excluded}',
+            f'{start} ~ {end} 출고요청 기준\n실제 출고 {new}행 · 기존 반영 {duplicate}행\n스마트스토어는 자동으로 제외했습니다.\n선택 제외: {excluded}',
             parent=self.root,
         )
 
@@ -1772,7 +1839,9 @@ class Desktop:
             filetypes=[('스마트스토어 출고파일','*.xlsx *.xlsm *.xls *.csv')],
         )
         if path:
-            new,duplicate=self.service.import_smartstore_erp(path,None);self.refresh()
+            new,duplicate=self.service.import_smartstore_erp(path,None)
+            self.show_smartstore_import_period(path)
+            self.refresh()
             messagebox.showinfo('반영 완료',f'스마트스토어 출고파일 {new}행 · 중복 제외 {duplicate}행\n원본 결제일 기준으로 저장했습니다.')
 
     def smartstore_purchase_results(self):
@@ -1781,8 +1850,21 @@ class Desktop:
             filetypes=[('스마트스토어 구매확정파일','*.xlsx *.xlsm *.xls *.csv')],
         )
         if path:
-            new,duplicate=self.service.import_smartstore_purchase(path,None);self.refresh()
+            new,duplicate=self.service.import_smartstore_purchase(path,None)
+            self.show_smartstore_import_period(path)
+            self.refresh()
             messagebox.showinfo('반영 완료',f'스마트스토어 구매확정 {new}행 · 중복 제외 {duplicate}행\n원본 결제일 기준으로 저장했습니다.')
+
+    def show_smartstore_import_period(self, path):
+        days=[]
+        for row in self.service.db.execute('SELECT day,data FROM smartstore_erp_rows'):
+            data=json.loads(row['data'])
+            if any(str(value)==Path(path).name for key,value in data.items() if 'file' in key):
+                days.append(row['day'])
+        if days:
+            self.erp_ship_from.set(min(days))
+            self.erp_ship_through.set(max(days))
+        self.source_tabs.select(self.smartstore_source_frame)
 
     def save_esm_login(self):
         save_credentials(
@@ -1968,11 +2050,14 @@ class Desktop:
         if not hasattr(self,'confirmed_shipments'):
             return
         self.confirmed_shipments.delete(*self.confirmed_shipments.get_children())
+        self.smartstore_inputs.delete(*self.smartstore_inputs.get_children())
         self.confirmed_entry_ids={}
         start=date.fromisoformat(self.erp_ship_from.get()).isoformat()
         end=date.fromisoformat(self.erp_ship_through.get()).isoformat()
         if start>end:raise ValueError('조회 시작일은 종료일보다 늦을 수 없습니다.')
         entries=self.service.confirmed_erp_entries(start,end)
+        smartstore_entries=[entry for entry in entries if entry['source']=='스마트스토어 ERP']
+        entries=[entry for entry in entries if entry['source']!='스마트스토어 ERP']
         customers=sorted({INTERNAL_TO_CHANNEL.get(entry['channel'],entry['channel']) for entry in entries})
         choices=['전체 거래처',*customers]
         self.erp_ship_customer_box.configure(values=choices)
@@ -1981,28 +2066,32 @@ class Desktop:
         selected_customer=self.erp_ship_customer.get()
         if selected_customer!='전체 거래처':
             entries=[entry for entry in entries if INTERNAL_TO_CHANNEL.get(entry['channel'],entry['channel'])==selected_customer]
+        entries.extend(smartstore_entries)
         for index,entry in enumerate(entries):
             item_id=f'confirmed-{index}';self.confirmed_entry_ids[item_id]=entry['id']
-            self.confirmed_shipments.insert('', 'end', iid=item_id, values=[
+            tree=self.smartstore_inputs if entry['source']=='스마트스토어 ERP' else self.confirmed_shipments
+            tree.insert('', 'end', iid=item_id, values=[
                 entry['source'],entry['day'],INTERNAL_TO_CHANNEL.get(entry['channel'],entry['channel']),
                 entry['order_no'],entry['recipient'],entry['code'],entry['product'],entry.get('warehouse',''),
                 entry['quantity'],entry['tracking'] or '—',
             ])
         self.root.after_idle(lambda:autosize_tree(self.confirmed_shipments,maximum=300))
+        self.root.after_idle(lambda:autosize_tree(self.smartstore_inputs,maximum=300))
+        self.workflow_statuses[0].set(f'일반 출고 {len(self.confirmed_shipments.get_children()):,}행 · 스마트스토어 {len(self.smartstore_inputs.get_children()):,}행')
 
     def refresh_actual_erp_day(self):
         self.refresh_confirmed_shipments()
         self.refresh_erp_shipments()
 
     def selected_confirmed_entry(self):
-        item_id=self.selected(self.confirmed_shipments)[0]
+        item_id=self.selected(self.current_input_tree())[0]
         entry_id=self.confirmed_entry_ids[item_id]
         return next(entry for entry in self.service.confirmed_erp_entries(
             self.erp_ship_from.get(),self.erp_ship_through.get()
         ) if entry['id']==entry_id)
 
     def delete_confirmed_shipments(self):
-        item_ids=list(self.selected(self.confirmed_shipments))
+        item_ids=list(self.selected(self.current_input_tree()))
         entry_ids=[self.confirmed_entry_ids[item_id] for item_id in item_ids]
         unique_orders=len(set(entry_id.split(':',2)[1] if entry_id.startswith('SSERP:') else entry_id for entry_id in entry_ids))
         if not messagebox.askyesno(
@@ -2013,6 +2102,11 @@ class Desktop:
         deleted=self.service.delete_confirmed_erp_entries(entry_ids)
         self.refresh()
         messagebox.showinfo('삭제 완료',f'출고 주문 {deleted:,}건을 삭제했습니다.',parent=self.root)
+
+    def current_input_tree(self):
+        if self.source_tabs.select()==str(self.smartstore_source_frame):
+            return self.smartstore_inputs
+        return self.confirmed_shipments
 
     def change_shipment_warehouse(self):
         entry=self.selected_confirmed_entry()
@@ -2058,6 +2152,7 @@ class Desktop:
                 ' / '.join(f"{item['name']} {format_money(item['amount'])}원" for item in row['components']),
             ])
         self.root.after_idle(lambda:autosize_tree(self.erp_shipments,maximum=320))
+        self.workflow_statuses[1].set(f'금액 분리·매칭 확인 대상 {len(self.amount_split_rows):,}건 · 확인 항목이 없으면 다음 단계로 이동하세요.')
 
     def split_order_amount(self):
         item_id=self.selected(self.erp_shipments)[0]
