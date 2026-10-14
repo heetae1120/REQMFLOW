@@ -38,12 +38,25 @@ class PopupLifecycleTests(unittest.TestCase):
     def test_selection_closes_list_even_if_selected_handler_requests_reopen(self):
         self.open()
         self.box.bind('<<ComboboxSelected>>',lambda _:post_combobox(self.box,['미사용','주문일시','순번']))
+        self.box._reqm_popup_list.event_generate('<ButtonPress-1>',x=8,y=8)
         self.box._reqm_popup_list.event_generate('<ButtonRelease-1>',x=8,y=8)
         self.root.update()
         self.assertEqual(self.box.get(),'미사용')
         self.assertFalse(self.box._reqm_popup.winfo_viewable())
         self.box._reqm_popup_list.event_generate('<ButtonRelease-1>',x=8,y=40)
         self.root.update();self.assertEqual(self.box.get(),'미사용')
+
+    def test_drag_or_release_without_press_never_commits_a_value(self):
+        self.box.set('원래값');self.open()
+        choices=self.box._reqm_popup_list
+        choices.event_generate('<ButtonRelease-1>',x=8,y=8)
+        self.root.update();self.assertEqual(self.box.get(),'원래값')
+        choices.event_generate('<ButtonPress-1>',x=8,y=8)
+        choices.event_generate('<B1-Motion>',x=8,y=40)
+        choices.event_generate('<ButtonRelease-1>',x=8,y=40)
+        self.root.update();self.assertEqual(self.box.get(),'원래값')
+        self.box.event_generate('<MouseWheel>',delta=-120)
+        self.assertEqual(self.box.get(),'원래값')
 
     def test_tab_change_hides_list_and_stale_click_cannot_edit_hidden_input(self):
         self.box.set('원래값');self.open()

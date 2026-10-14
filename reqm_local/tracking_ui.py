@@ -9,6 +9,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 
+from .ui_helpers import after_latest
 from .esm import save_credentials, load_credentials
 from .tracking import KINDS, STATES, delivery_key
 from .tracking_store import encode, valid_day
@@ -62,7 +63,7 @@ class TrackingPanel:
         ttk.Entry(filters,textvariable=self.search,width=32).pack(side='left',padx=4)
         ttk.Label(filters,text='송장 · 주문번호 · 수령인 검색').pack(side='left')
         self.filter.trace_add('write',lambda *_:self.render_rows())
-        self.search.trace_add('write',lambda *_:self.render_rows())
+        self.search.trace_add('write',lambda *_:after_latest(self.host.root,'tracking-search',self.render_rows))
         table_area=ttk.Frame(frame);table_area.grid(row=6,column=0,sticky='nsew',pady=5)
         self.row_tree=host.tree(table_area,['상태','송장번호','판매처','주문번호','수령인','연락처','상품 · 수량','확인 내용'],[95,165,115,170,100,130,220,280])
         self.row_tree.configure(height=12)
