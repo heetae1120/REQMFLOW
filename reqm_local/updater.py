@@ -108,7 +108,7 @@ def update_backup_directory(install_dir):
 def launch_replacer(source, install_dir, process_id, *, restart_test_folder=None):
     source,install_dir = Path(source).resolve(),Path(install_dir).resolve()
     script = source.parent/'apply-update.ps1'
-    script.write_text(r'''param([string]$Source,[string]$Target,[int]$ProcessId,[string]$BackupDirectory,[string]$RestartTestFolder='')
+    script.write_text(r'''param([string]$Source,[string]$Target,[int]$ProcessId,[string]$BackupDirectory,[string]$TargetName='REQM_FLOW.exe',[string]$RestartTestFolder='')
 $ErrorActionPreference = 'Stop'
 $env:PYINSTALLER_RESET_ENVIRONMENT = '1'
 for($i=0; $i -lt 120; $i++) {
@@ -118,23 +118,61 @@ for($i=0; $i -lt 120; $i++) {
 if(Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) { exit 2 }
 New-Item -ItemType Directory -Force -Path $Target | Out-Null
 ${newExe} = Join-Path $Source 'REQM_FLOW.exe'
-${targetExe} = Join-Path $Target 'REQM_FLOW.exe'
+${targetExe} = Join-Path $Target $TargetName
 ${backupExe} = Join-Path $BackupDirectory 'REQM_FLOW.previous.exe'
 if(-not (Test-Path -LiteralPath ${newExe})) { exit 3 }
 New-Item -ItemType Directory -Force -Path $BackupDirectory | Out-Null
-if(Test-Path -LiteralPath ${backupExe}) { Remove-Item -LiteralPath ${backupExe} -Force }
-if(Test-Path -LiteralPath ${targetExe}) { Move-Item -LiteralPath ${targetExe} -Destination ${backupExe} -Force }
+$log = Join-Path $BackupDirectory 'update.log'
+$backupReady = $false
+$writeStarted = $false
+function File-Hash([string]$File) {
+  $stream = [IO.File]::OpenRead($File)
+  $hasher = [Security.Cryptography.SHA256]::Create()
+  try { return [BitConverter]::ToString($hasher.ComputeHash($stream)) }
+  finally { $stream.Dispose(); $hasher.Dispose() }
+}
+function Copy-Verified([string]$From, [string]$To, [string]$Hash) {
+  for($attempt=1; $attempt -le 30; $attempt++) {
+    try {
+      Copy-Item -LiteralPath $From -Destination $To -Force
+      if((File-Hash $To) -ne $Hash) { throw 'Copied file hash mismatch' }
+      return
+    } catch {
+      if($attempt -eq 30) { throw }
+      Start-Sleep -Milliseconds 250
+    }
+  }
+}
 try {
-  Copy-Item -LiteralPath ${newExe} -Destination ${targetExe} -Force
+  $expectedHash = File-Hash ${newExe}
+  if(Test-Path -LiteralPath ${targetExe}) {
+    $oldHash = File-Hash ${targetExe}
+    Copy-Verified ${targetExe} ${backupExe} $oldHash
+    $backupReady = $true
+  }
+  $writeStarted = $true
+  Copy-Verified ${newExe} ${targetExe} $expectedHash
   if($RestartTestFolder) {
     Start-Process -FilePath ${targetExe} -WorkingDirectory $Target -ArgumentList @('--self-test', ('"' + $RestartTestFolder + '"')) -WindowStyle Hidden
   } else {
     Start-Process -FilePath ${targetExe} -WorkingDirectory $Target -WindowStyle Normal
   }
+  Set-Content -LiteralPath $log -Value ('Update verified: ' + (Get-Date)) -Encoding UTF8
 } catch {
-  if(Test-Path -LiteralPath ${targetExe}) { Remove-Item -LiteralPath ${targetExe} -Force }
-  if(Test-Path -LiteralPath ${backupExe}) { Move-Item -LiteralPath ${backupExe} -Destination ${targetExe} -Force }
-  if(Test-Path -LiteralPath ${targetExe}) { Start-Process -FilePath ${targetExe} -WorkingDirectory $Target -WindowStyle Normal }
+  $failure = $_.Exception.Message
+  try {
+    if($writeStarted -and $backupReady) {
+      Copy-Verified ${backupExe} ${targetExe} $oldHash
+      if($RestartTestFolder) {
+        Start-Process -FilePath ${targetExe} -WorkingDirectory $Target -ArgumentList @('--self-test', ('"' + $RestartTestFolder + '"')) -WindowStyle Hidden
+      } else {
+        Start-Process -FilePath ${targetExe} -WorkingDirectory $Target -WindowStyle Normal
+      }
+    }
+    Set-Content -LiteralPath $log -Value ('Update failed; original preserved or restored: ' + $failure) -Encoding UTF8
+  } catch {
+    Set-Content -LiteralPath $log -Value ('Restore failed; backup retained: ' + $_.Exception.Message) -Encoding UTF8
+  }
   exit 4
 }
 $stagePath = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
@@ -150,6 +188,7 @@ if($stagePath.StartsWith($tempPath,[StringComparison]::OrdinalIgnoreCase) -and
         'powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(script),
         '-Source',str(source),'-Target',str(install_dir),'-ProcessId',str(process_id),
         '-BackupDirectory',str(update_backup_directory(install_dir)),
+        '-TargetName',Path(sys.executable).name if getattr(sys,'frozen',False) else 'REQM_FLOW.exe',
     ]
     if restart_test_folder is not None:
         command.extend(['-RestartTestFolder',str(Path(restart_test_folder).resolve())])

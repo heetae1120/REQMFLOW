@@ -35,7 +35,7 @@ from .shipping import compact
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.47'
+APP_VERSION = '1.9.48'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
