@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import date, timedelta
 from decimal import Decimal
+from .ui_helpers import format_money
 
 
 class VoucherPanel:
@@ -57,7 +58,7 @@ class VoucherPanel:
                 code = component.get('code', '')
                 self.tree.insert('', 'end', iid=key, values=[group['day'], group['channel'], code,
                     self.service.item_name(code, component.get('name', '')) if code else group['data'].get('product',''),
-                    component.get('quantity',group['data'].get('quantity','')), component.get('amount',group['data'].get('amount','')), state], tags=('warning',) if warnings else ())
+                    component.get('quantity',group['data'].get('quantity','')), format_money(component.get('amount',group['data'].get('amount',''))), state], tags=('warning',) if warnings else ())
         total = sum((g['total'] for g in groups), Decimal(0))
         pending = sum((not g['confirmed'] or bool(g['issue'])) and not g['exported'] for g in groups)
         exported=sum(g['exported'] for g in groups)
@@ -87,7 +88,7 @@ class VoucherPanel:
         win = tk.Toplevel(self.app.root); win.title('전표 상품금액 입력'); win.transient(self.app.root); win.grab_set()
         frame = ttk.Frame(win, padding=18); frame.pack(fill='both', expand=True)
         ttk.Label(frame, text=f"{group['channel']} · 주문 {group['data'].get('order_no', '')} · {group['data'].get('recipient', '')}").pack(anchor='w')
-        total = tk.StringVar(value=str(group['total'] if group['confirmed'] or not group['full'] else group['data'].get('amount') or '0'))
+        total = tk.StringVar(value=format_money(group['total'] if group['confirmed'] or not group['full'] else group['data'].get('amount') or '0', grouped=False))
         ttk.Label(frame, text='이번 출고 상품 총금액 (배송비 제외)').pack(anchor='w', pady=(12, 2))
         ttk.Entry(frame, textvariable=total).pack(anchor='w')
         suggestion = self.service.voucher_suggestion(group)
@@ -95,7 +96,7 @@ class VoucherPanel:
         for index, component in enumerate(group['components']):
             name = self.service.item_name(component['code'], component.get('name', ''))
             ttk.Label(frame, text=f"{name} · {component['code']} · 수량 {component['quantity']} · 색상공유 그룹 {self.service.voucher_family(component['code'])}").pack(anchor='w', pady=(8, 2))
-            variable = tk.StringVar(value=suggestion[index] if suggestion else str(component['amount']))
+            variable = tk.StringVar(value=format_money(suggestion[index] if suggestion else component['amount'], grouped=False))
             values.append(variable); ttk.Entry(frame, textvariable=variable).pack(anchor='w')
         if len(values) == 1:
             total.trace_add('write', lambda *_: values[0].set(total.get()))
@@ -149,8 +150,8 @@ class VoucherPanel:
             amounts = {self.service.voucher_fee(d) for d in data} - {Decimal(0)}
             done = self.service.db.execute('SELECT 1 FROM fees WHERE bundle IN (?,?)', (key, self.service.bundle_key(data[0]))).fetchone()
             tree.insert('', 'end', iid=key, values=[data[0].get('channel', ''), data[0].get('account', ''), data[0]['order_no'],
-                ' / '.join(sorted({str(d.get('shipping') or '0') for d in data})),
-                '확인 필요' if len(amounts) > 1 else str(next(iter(amounts), Decimal(0))), '이미 반영' if done else '확인 필요' if len(amounts) > 1 else '한 번 반영'])
+                ' / '.join(sorted({format_money(d.get('shipping') or '0') for d in data})),
+                '확인 필요' if len(amounts) > 1 else format_money(next(iter(amounts), Decimal(0))), '이미 반영' if done else '확인 필요' if len(amounts) > 1 else '한 번 반영'])
         def edit(_):
             from tkinter.simpledialog import askstring
             key = self.app.selected(tree)[0]; data = rows[key][0]
@@ -183,7 +184,7 @@ class VoucherPanel:
         ttk.Label(win, text=f'전표일 {self.voucher_day.get()} · {len(rows)}행 · 배송비 포함 총금액 {total:,}원', padding=12).pack(anchor='w')
         tree = self.app.tree(win, ['거래처코드', '품목코드', '품목명', '창고', '수량', '단가', '총금액'], [120, 170, 280, 70, 70, 110, 130])
         for row in rows:
-            tree.insert('', 'end', values=[row[2], row[12], row[13], row[5], row[15], row[16], row[15] * row[16]])
+            tree.insert('', 'end', values=[row[2], row[12], row[13], row[5], row[15], format_money(row[16]), format_money(row[15] * row[16])])
 
     def export(self):
         # Validate before prompting for a destination.
