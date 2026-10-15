@@ -2,7 +2,7 @@ import json,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch
 from reqm_local.service import Operations
-from reqm_local.incremental_sync import IncrementalSync,local_records,canonical
+from reqm_local.incremental_sync import IncrementalSync,local_records,canonical,record_key
 from reqm_local.sync_transport import SyncTransport,SyncHTTPError
 from tests.test_tracking import REFERENCE
 
@@ -70,6 +70,49 @@ class IncrementalTests(unittest.TestCase):
             sync=IncrementalSync(c,'test');self.assertTrue(sync.prepare()['conflicts'])
             self.assertEqual(self.server.cycle(sync)['uploads'],[])
         finally:c.close()
+    def test_entered_order_collision_keeps_local_shipping_and_retires_remote_duplicate(self):
+        with self.b.db:
+            self.b.db.execute('INSERT INTO requests VALUES(?,?)',('LOCAL-REQUEST','2026-10-15'))
+            self.b.db.execute('INSERT INTO request_lines VALUES(?,?,?,?,?)',('LOCAL-LINE','LOCAL-REQUEST','ORDER',0,1))
+            self.b.db.execute('INSERT INTO shipments VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                ('LOCAL-SHIPMENT','LOCAL-LINE',1,'TRACK-1','2026-10-15','ERP-1','100','100','상품','100',0))
+        order=next(row['payload'] for row in local_records(self.a).values() if row['table_name']=='orders')
+        duplicate={**order,'id':'REMOTE-ORDER','data':canonical({'order_no':'A','recipient':'서버 자료'})}
+        records=[
+            ('orders',duplicate,['id']),
+            ('requests',{'id':'REMOTE-REQUEST','day':'2026-10-15'},['id']),
+            ('request_lines',{'id':'REMOTE-LINE','request_id':'REMOTE-REQUEST','order_id':'REMOTE-ORDER','component':0,'qty':1},['id']),
+            ('shipments',{'id':'REMOTE-SHIPMENT','line_id':'REMOTE-LINE','qty':1,'tracking':'TRACK-1','day':'2026-10-14',
+                'erp_id':'ERP-OLD','erp_amount':None,'erp_code':None,'erp_name':None,'erp_warehouse':None,'amount_split_confirmed':0},['id']),
+            ('tracking_jobs',{'id':'REMOTE-JOB','identity':'remote-job','day':'2026-10-15','kind':'b2c','source_name':'',
+                'source_content':{'__reqm_bytes__':'YQ=='},'created_by':'worker','created_at':'2026-10-15T00:00:00'},['id']),
+            ('tracking_rows',{'id':'REMOTE-TRACKING-ROW','job_id':'REMOTE-JOB','order_id':'REMOTE-ORDER',
+                'data':canonical({'order_no':'A'}),'state':'pending','tracking':'','reason':'','evidence':'[]',
+                'queried_at':'','confirmed_at':'','confirmed_by':''},['id']),
+        ]
+        duplicate_keys=[]
+        for table,payload,keys in records:
+            key=record_key(table,payload,keys);duplicate_keys.append(key);self.server.version+=1
+            self.server.rows[key]={'row_key':key,'table_name':table,'payload':payload,'deleted':False,'revision':self.server.version}
+
+        plan=self.server.cycle(self.sb)
+
+        self.assertEqual(plan['conflicts'],{})
+        self.assertEqual(self.b.db.execute('SELECT COUNT(*) FROM orders').fetchone()[0],1)
+        self.assertEqual(self.b.db.execute('SELECT id FROM orders').fetchone()[0],'ORDER')
+        self.assertEqual(self.b.db.execute('SELECT id FROM shipments').fetchone()[0],'LOCAL-SHIPMENT')
+        self.assertEqual(self.b.db.execute('SELECT order_id FROM tracking_rows').fetchone()[0],'ORDER')
+        self.assertEqual(self.server.rows[duplicate_keys[-1]]['payload']['order_id'],'ORDER')
+        self.assertFalse(self.server.rows[duplicate_keys[-1]]['deleted'])
+        for key in duplicate_keys:
+            if self.server.rows[key]['table_name'] in ('orders','requests','request_lines','shipments'):
+                self.assertTrue(self.server.rows[key]['deleted'])
+        self.server.cycle(self.sa)
+        self.assertEqual(self.a.db.execute('SELECT COUNT(*) FROM orders').fetchone()[0],1)
+        self.assertEqual(self.a.db.execute('SELECT COUNT(*) FROM shipments').fetchone()[0],1)
+        self.assertEqual(self.a.db.execute('SELECT order_id FROM tracking_rows').fetchone()[0],'ORDER')
+        self.server.cycle(self.sb)
+        self.assertEqual(self.b.db.execute('SELECT COUNT(*) FROM shipments').fetchone()[0],1)
     def test_no_change_does_not_rewrite_local_cache(self):
         self.server.cycle(self.sa);before=self.a.db.total_changes
         self.server.cycle(self.sa);self.assertEqual(self.a.db.total_changes,before)

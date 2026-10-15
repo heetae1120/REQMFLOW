@@ -60,6 +60,58 @@ class IncrementalSync:
         for r in remote:
             payload=None if r['deleted'] else {**snapshot.get('defaults',{}).get(r['table_name'],{}),**r['payload']}
             merged[r['row_key']]={'table_name':r['table_name'],'payload':payload,'revision':r['revision']}
+        # An already-entered local order is authoritative when the same business
+        # identity arrives under a different row ID. Retire the duplicate server
+        # graph so the order and its existing shipping records remain intact on
+        # every client, instead of failing on orders.identity's UNIQUE index.
+        local_orders={}
+        for row in current.values():
+            payload=row.get('payload')
+            if row['table_name']=='orders' and payload:
+                local_orders[payload.get('identity')]=payload
+        duplicate_order_ids={}
+        duplicate_keys=set()
+        for key,row in merged.items():
+            payload=row.get('payload')
+            if row['table_name']!='orders' or not payload:continue
+            local=local_orders.get(payload.get('identity'))
+            if local and local.get('id')!=payload.get('id'):
+                duplicate_order_ids[payload['id']]=local['id'];duplicate_keys.add(key)
+        duplicate_line_ids=set();duplicate_request_ids=set();suppressed=set(duplicate_keys)
+        for key,row in merged.items():
+            payload=row.get('payload')
+            if row['table_name']=='request_lines' and payload and payload.get('order_id') in duplicate_order_ids:
+                duplicate_line_ids.add(payload.get('id'));duplicate_request_ids.add(payload.get('request_id'));suppressed.add(key)
+        for key,row in merged.items():
+            payload=row.get('payload')
+            if row['table_name']=='shipments' and payload and payload.get('line_id') in duplicate_line_ids:
+                suppressed.add(key)
+        local_request_ids={row['payload'].get('request_id') for row in current.values()
+            if row['table_name']=='request_lines' and row.get('payload')}
+        remaining_cloud_request_ids={row['payload'].get('request_id') for key,row in merged.items()
+            if key not in suppressed and row['table_name']=='request_lines' and row.get('payload')}
+        orphaned_requests=duplicate_request_ids-local_request_ids-remaining_cloud_request_ids
+        for key,row in merged.items():
+            payload=row.get('payload')
+            if row['table_name']=='requests' and payload and payload.get('id') in orphaned_requests:
+                suppressed.add(key)
+        forced_changes=[]
+        for key,row in list(merged.items()):
+            payload=row.get('payload')
+            if key in suppressed or not payload:continue
+            duplicate_id=payload.get('order_id')
+            canonical_id=duplicate_order_ids.get(duplicate_id)
+            if canonical_id and duplicate_id!=canonical_id:
+                updated={**payload,'order_id':canonical_id}
+                forced_changes.append({'row_key':key,'table_name':row['table_name'],'payload':updated,
+                    'deleted':False,'expected_revision':row['revision']})
+                merged[key]={**row,'payload':updated}
+        for key in suppressed:
+            row=merged[key]
+            if row.get('payload') is not None:
+                forced_changes.append({'row_key':key,'table_name':row['table_name'],'payload':None,
+                    'deleted':True,'expected_revision':row['revision']})
+                merged[key]={**row,'payload':None}
         uploads=[];incoming=[];conflicts={}
         for key in set(current)|set(merged):
             local=current.get(key,{}).get('payload');old=base.get(key,{}).get('payload')
@@ -83,7 +135,9 @@ class IncrementalSync:
             elif cloud!=old:
                 conflicts[key]={'local':local,'remote':cloud,'table_name':table,'revision':revision};continue
             uploads.append({'row_key':key,'table_name':table,'payload':local,'deleted':local is None,'expected_revision':revision})
-        return {'uploads':uploads,'incoming':incoming,'baseline':merged,'conflicts':conflicts}
+        uploads_by_key={item['row_key']:item for item in uploads}
+        uploads_by_key.update({item['row_key']:item for item in forced_changes})
+        return {'uploads':list(uploads_by_key.values()),'incoming':incoming,'baseline':merged,'conflicts':conflicts}
 
     def apply(self,snapshot,plan,version,acknowledged):
         service=self.service;now=local_records(service)

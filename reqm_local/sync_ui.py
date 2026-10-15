@@ -124,7 +124,11 @@ class SyncPanel:
         elif isinstance(exc,SyncHTTPError) and exc.status in (400,401,403,402,429):
             self.paused=True
             message='사용량 제한 · 자동 재시도 중단' if exc.status in (402,429) else '로그인·권한 확인 필요'
-        else:message='연결 대기 · 로컬 자료 유지'
+        else:
+            detail=' '.join(str(exc).split()) or '상세 사유 없음'
+            if isinstance(exc,SyncHTTPError):detail=f'Supabase HTTP {exc.status} · {exc.code}'
+            else:detail=f'{type(exc).__name__} · {detail}'
+            message=f'동기화 오류 · {detail[:100]}'
         self.host.cloud_status.set(message)
 
     def review(self):
