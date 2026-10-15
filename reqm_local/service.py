@@ -736,6 +736,14 @@ class Operations(TrackingOperations, VoucherOperations):
             return components, f'{amount_issue}; {component_issue}'
         return components, amount_issue
 
+    @staticmethod
+    def _match_state(components, issue):
+        # A known item mapping is sufficient to prepare shipment. Keep the
+        # amount warning visible; ERP export independently requires its amount.
+        if components and issue and issue.startswith('판매처 금액 누락:'):
+            return '출고 준비'
+        return '검토 필요' if issue else '출고 준비'
+
     def import_files(self, paths, channel_override=None, registered_on=None):
         incoming = []
         registered_on=day(registered_on or date.today().isoformat())
@@ -782,7 +790,7 @@ class Operations(TrackingOperations, VoucherOperations):
                     duplicates += 1
                     continue
                 components, issue = self.match(data)
-                self.db.execute('INSERT INTO orders VALUES(?,?,?,?,?,?)', (uuid.uuid4().hex, key, encode(data), encode(components), '검토 필요' if issue else '출고 준비', issue))
+                self.db.execute('INSERT INTO orders VALUES(?,?,?,?,?,?)', (uuid.uuid4().hex, key, encode(data), encode(components), self._match_state(components, issue), issue))
                 inserted += 1
             self.event('주문 가져오기', f'신규 {inserted}, 중복 {duplicates}')
         return inserted, duplicates
@@ -978,7 +986,7 @@ class Operations(TrackingOperations, VoucherOperations):
                     continue
                 components, issue = self.match(data)
                 self.db.execute('UPDATE orders SET data=?,components=?,state=?,issue=? WHERE id=?',
-                    (encode(data),encode(components),'검토 필요' if issue else '출고 준비',issue,order['id']))
+                    (encode(data),encode(components),self._match_state(components, issue),issue,order['id']))
 
     def refresh_matches(self):
         with self.db:
@@ -986,7 +994,7 @@ class Operations(TrackingOperations, VoucherOperations):
                 if order['state'] not in ('검토 필요','출고 준비'):continue
                 components,issue=self.match(order['data'])
                 self.db.execute('UPDATE orders SET data=?,components=?,state=?,issue=? WHERE id=?',
-                    (encode(order['data']),encode(components),'검토 필요' if issue else '출고 준비',issue,order['id']))
+                    (encode(order['data']),encode(components),self._match_state(components, issue),issue,order['id']))
 
     def orders(self):
         orders = [{**dict(row), 'data':json.loads(row['data']), 'components':json.loads(row['components'])}
@@ -1049,7 +1057,7 @@ class Operations(TrackingOperations, VoucherOperations):
                 current['event_components'] = json.loads(rule['components'] or '[]')
                 matched, issue = self.match(current)
                 self.db.execute('UPDATE orders SET data=?,components=?,state=?,issue=? WHERE id=?',
-                    (encode(current),encode(matched),'검토 필요' if issue else '출고 준비',issue,pending['id']))
+                    (encode(current),encode(matched),self._match_state(matched, issue),issue,pending['id']))
             self.event('이벤트 규칙 저장', f'{data["channel"]} / {name} / {source_product} / {source_option}')
         if customer:
             self.settings.setdefault('channel_customer_codes',{})[data['channel']] = customer
@@ -1082,7 +1090,7 @@ class Operations(TrackingOperations, VoucherOperations):
                 current.pop('event_components',None); current.pop('event_unit_amount',None)
                 matched, issue = self.match(current)
                 self.db.execute('UPDATE orders SET data=?,components=?,state=?,issue=? WHERE id=?',
-                    (encode(current),encode(matched),'검토 필요' if issue else '출고 준비',issue,pending['id']))
+                    (encode(current),encode(matched),self._match_state(matched, issue),issue,pending['id']))
             self.event('이벤트 규칙 삭제',rule_id)
 
     def delete_orders(self, ids):
@@ -1180,7 +1188,7 @@ class Operations(TrackingOperations, VoucherOperations):
             for order in self.orders():
                 if order['state'] in ('검토 필요', '출고 준비') and self.mapping_key(order['data']) == key:
                     matched, issue = self.match(order['data'])
-                    self.db.execute('UPDATE orders SET data=?,components=?,state=?,issue=? WHERE id=?', (encode(order['data']), encode(matched), '검토 필요' if issue else '출고 준비', issue, order['id']))
+                    self.db.execute('UPDATE orders SET data=?,components=?,state=?,issue=? WHERE id=?', (encode(order['data']), encode(matched), self._match_state(matched, issue), issue, order['id']))
             self.event('매칭 저장', order_id)
         if customer:
             self.settings.setdefault('channel_customer_codes',{})[data['channel']] = customer
@@ -1227,7 +1235,7 @@ class Operations(TrackingOperations, VoucherOperations):
                 data[key] = fields[key].strip()
             data = self._normalize_delivery(data)
             components, issue = self.match(data)
-            self.db.execute('UPDATE orders SET data=?,components=?,state=?,issue=? WHERE id=?', (encode(data), encode(components), '검토 필요' if issue else '출고 준비', issue, order_id))
+            self.db.execute('UPDATE orders SET data=?,components=?,state=?,issue=? WHERE id=?', (encode(data), encode(components), self._match_state(components, issue), issue, order_id))
             self.event('배송정보 수정', order_id)
 
     def _artifact(self, artifact_id, kind, on, content, path):

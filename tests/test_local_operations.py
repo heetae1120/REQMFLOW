@@ -213,11 +213,15 @@ class LocalTests(unittest.TestCase):
         updated=next(row for row in self.s.orders() if row['id']==order['id'])
         self.assertEqual(updated['components'][0]['code'],'TEST')
         self.assertEqual(updated['components'][0]['amount'],'0')
-        self.assertEqual(updated['state'],'검토 필요')
+        self.assertEqual(updated['state'],'출고 준비')
         self.assertIn('금액 누락',updated['issue'])
         saved=self.s.db.execute('SELECT components FROM mappings WHERE key=?',
             (self.s.mapping_key(updated['data']),)).fetchone()
         self.assertIsNotNone(saved)
+        self.s.request([order['id']],'2026-10-15',self.folder/'ably-request.xlsx')
+        self.assertEqual(self.s.db.execute(
+            'SELECT COUNT(*) FROM request_lines WHERE order_id=?',(order['id'],)
+        ).fetchone()[0],1)
 
     def test_shipping_item_names_survive_restart_without_legacy_seeding(self):
         self.s.close();self.s=Operations(self.folder/'data',REFERENCE)
