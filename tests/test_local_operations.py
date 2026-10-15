@@ -203,6 +203,22 @@ class LocalTests(unittest.TestCase):
         self.s.set_mapping(order['id'],[component])
         self.assertEqual(self.s.orders()[0]['state'],'출고 준비')
 
+    def test_saved_product_mapping_stays_applied_when_ably_amount_is_missing(self):
+        _,order=self.import_order(amount=0,channel='에이블리')
+        data=dict(order['data']);data['amount_missing']=True
+        self.s.db.execute('UPDATE orders SET data=? WHERE id=?',(encode(data),order['id']))
+        component=dict(code='TEST',logistics_code='WARE-TEST',name='테스트',quantity=1,
+            unit_amount='0',warehouse='300',customer='ABLE-C')
+        self.s.set_mapping(order['id'],[component])
+        updated=next(row for row in self.s.orders() if row['id']==order['id'])
+        self.assertEqual(updated['components'][0]['code'],'TEST')
+        self.assertEqual(updated['components'][0]['amount'],'0')
+        self.assertEqual(updated['state'],'검토 필요')
+        self.assertIn('금액 누락',updated['issue'])
+        saved=self.s.db.execute('SELECT components FROM mappings WHERE key=?',
+            (self.s.mapping_key(updated['data']),)).fetchone()
+        self.assertIsNotNone(saved)
+
     def test_shipping_item_names_survive_restart_without_legacy_seeding(self):
         self.s.close();self.s=Operations(self.folder/'data',REFERENCE)
         self.assertEqual(len(self.s.item_choices()),186)

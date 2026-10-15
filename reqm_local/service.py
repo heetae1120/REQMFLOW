@@ -478,14 +478,14 @@ class Operations(TrackingOperations, VoucherOperations):
         if not components:
             raise ValueError('구성품을 한 개 이상 입력하세요.')
         validated = []
-        for source in components:
+        for index, source in enumerate(components, start=1):
             component = {key:identifier(source.get(key,'')) for key in ('code','logistics_code','name','warehouse','customer')}
             labels = {'code':'ERP 품목코드','logistics_code':'물류사 품목코드','name':'품목명','warehouse':'창고','customer':'ERP 거래처코드'}
             for key in ('code','logistics_code','name','warehouse','customer'):
                 if not component[key]:
                     if key == 'customer' and channel:
                         raise ValueError(f'{channel}의 ERP 거래처코드를 입력하세요. 한 번 저장하면 같은 판매처의 다음 매칭에 자동 적용됩니다.')
-                    raise ValueError(f'구성품의 {labels[key]}를 입력하세요.')
+                    raise ValueError(f'구성품 {index}의 {labels[key]}를 입력하세요.')
             component['warehouse'] = warehouse_code(component['warehouse'])
             component['name'] = self.item_name(component['code'],component['name'])
             self.require_active_item(component['code'])
@@ -672,17 +672,31 @@ class Operations(TrackingOperations, VoucherOperations):
 
     def match(self, data):
         self._apply_order_amount_rule(data)
-        if data.get('amount_missing'):
-            return [], '판매처 금액 누락: 품목별 금액 확인 필요 (0원으로 전표 생성 불가)'
-        if any(word in data['status'] for word in ('취소', '반품', '교환')):
+        amount_missing = bool(data.get('amount_missing'))
+        amount_issue = '판매처 금액 누락: 품목별 금액 확인 필요 (0원으로 전표 생성 불가)'
+        if any(word in data.get('status','') for word in ('취소', '반품', '교환')):
             return [], '취소·반품·교환 주문: 출고 보류'
+        if amount_missing:
+            definitions=data.get('event_components')
+            method='이벤트 변환 규칙'
+            if not definitions and getattr(self,'db',None) is not None:
+                custom=self.db.execute('SELECT components FROM mappings WHERE key=?',(self.mapping_key(data),)).fetchone()
+                if custom:
+                    definitions=json.loads(custom[0]);method='플로우 저장 매칭'
+            if definitions:
+                return self._match_components_without_amount(
+                    data,[{**component,'match_method':method} for component in definitions],amount_issue,
+                )
+            return [], amount_issue
         if not all(data[k] for k in ('recipient', 'phone', 'address', 'postcode')):
             return [], '배송정보 누락: 수령인·연락처·우편번호·주소 확인'
         if data.get('event_components'):
-            return self._build_components(data, [{**c,'match_method':'이벤트 변환 규칙'} for c in data['event_components']])
+            definitions=[{**c,'match_method':'이벤트 변환 규칙'} for c in data['event_components']]
+            return self._build_components(data, definitions)
         custom = self.db.execute('SELECT components FROM mappings WHERE key=?', (self.mapping_key(data),)).fetchone()
         if custom:
-            return self._build_components(data, [{**c,'match_method':'플로우 저장 매칭'} for c in json.loads(custom[0])])
+            definitions=[{**c,'match_method':'플로우 저장 매칭'} for c in json.loads(custom[0])]
+            return self._build_components(data, definitions)
         shipping_match = self._match_shipping_catalog(data)
         if shipping_match is not None:
             return shipping_match
@@ -707,6 +721,20 @@ class Operations(TrackingOperations, VoucherOperations):
             component['amount'] = str(number(component['amount']) + line.total)
             component['match_method'] = '판매전표 DB 변환 규칙'
         return self._attach_wekeep_skus(data, list(grouped.values()))
+
+    def _match_components_without_amount(self, data, definitions, amount_issue):
+        """Keep an explicit product mapping visible while its order price is reviewed."""
+        source_quantity=quantity(data.get('quantity') or '1')
+        components=[{
+            **component,
+            'quantity':source_quantity,
+            'source_quantity':source_quantity,
+            'amount':'0',
+        } for component in definitions]
+        components, component_issue=self._attach_wekeep_skus(data,components)
+        if component_issue:
+            return components, f'{amount_issue}; {component_issue}'
+        return components, amount_issue
 
     def import_files(self, paths, channel_override=None, registered_on=None):
         incoming = []

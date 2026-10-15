@@ -35,7 +35,7 @@ from .shipping import compact
 from .esm import download_esm_orders, load_credentials, save_credentials
 
 
-APP_VERSION = '1.9.50'
+APP_VERSION = '1.9.51'
 COMPLETED_ORDER_STATES = {'출고 요청','부분 출고','출고 완료'}
 
 
@@ -1598,7 +1598,15 @@ class Desktop:
                 _,widgets=entries.pop()
                 for widget in widgets:widget.destroy()
         def save():
-            components=[{field:var.get().strip() for field,var in variables.items()} for variables,_ in entries]
+            components=[]
+            for variables,widgets in entries:
+                component={field:var.get().strip() for field,var in variables.items()}
+                # The editable ERP-code combobox can show the selected label
+                # before its linked variable settles; read and normalize it at save time.
+                visible_code=widgets[fields.index('code')].get().strip()
+                if visible_code:
+                    component['code']=visible_code.split(' · ',1)[0].strip()
+                components.append(component)
             for component in components: component['quantity'] = '1'
             self.service.set_mapping(key,components)
             affected=sum(1 for order in self.service.orders() if self.service.mapping_key(order['data'])==self.service.mapping_key(d))
