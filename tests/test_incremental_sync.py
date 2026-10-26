@@ -1,4 +1,4 @@
-import json,tempfile,unittest
+import json,sqlite3,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch
 from reqm_local.service import Operations
@@ -116,6 +116,62 @@ class IncrementalTests(unittest.TestCase):
     def test_no_change_does_not_rewrite_local_cache(self):
         self.server.cycle(self.sa);before=self.a.db.total_changes
         self.server.cycle(self.sa);self.assertEqual(self.a.db.total_changes,before)
+    def tracking_record(self, order_id):
+        with self.b.db:
+            self.b.db.execute('INSERT INTO tracking_jobs VALUES(?,?,?,?,?,?,?,?)',
+                ('JOB','job','2026-10-26','b2c','source.xlsx',b'file','worker','2026-10-26T00:00:00'))
+            self.b.db.execute('INSERT INTO tracking_rows VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                ('TRACKING','JOB',order_id,canonical({'order_no':'A'}),'confirmed','1234567890','',
+                 '[]','','2026-10-26','worker'))
+        self.server.cycle(self.sb);self.server.cycle(self.sa)
+        return record_key('tracking_rows',{'id':'TRACKING'},['id'])
+
+    def test_late_tracking_update_detaches_previously_deleted_order_and_preserves_history(self):
+        key=self.tracking_record('ORDER')
+        with self.a.db:self.a.db.execute('DELETE FROM orders WHERE id=?',('ORDER',))
+        self.server.cycle(self.sa);self.server.cycle(self.sb)
+        self.assertIsNone(self.b.db.execute('SELECT order_id FROM tracking_rows').fetchone()[0])
+        # Another PC with stale links uploads a later tracking update after the
+        # parent tombstone has already passed this PC's cursor.
+        self.server.version+=1
+        stale={**self.server.rows[key]['payload'],'order_id':'ORDER','reason':'배송 조회 갱신'}
+        self.server.rows[key]={**self.server.rows[key],'payload':stale,'revision':self.server.version}
+        plan=self.server.cycle(self.sb)
+        saved=dict(self.b.db.execute('SELECT * FROM tracking_rows').fetchone())
+        self.assertEqual(saved,{**stale,'order_id':None})
+        self.assertEqual(list(self.b.db.execute('PRAGMA foreign_key_check')),[])
+        self.assertEqual(self.server.rows[key]['payload'],saved)
+        self.assertEqual([r['table_name'] for r in plan['uploads']],['tracking_rows'])
+        self.server.cycle(self.sa)
+        self.assertIsNone(self.a.db.execute('SELECT order_id FROM tracking_rows').fetchone()[0])
+        self.assertEqual(self.server.cycle(self.sb)['uploads'],[])
+
+    def test_unknown_parent_is_not_silently_treated_as_a_deleted_order(self):
+        key=self.tracking_record('ORDER')
+        self.server.version+=1
+        self.server.rows[key]={**self.server.rows[key],
+            'payload':{**self.server.rows[key]['payload'],'order_id':'UNKNOWN'},'revision':self.server.version}
+        snapshot=self.sb.prepare()
+        plan=self.sb.plan(snapshot,list(self.server.rows.values()))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.sb.apply(snapshot,plan,self.server.version,[])
+        self.assertEqual(self.sb.prepare()['cursor'],snapshot['cursor'])
+        self.assertEqual(self.b.db.execute('SELECT order_id FROM tracking_rows').fetchone()[0],'ORDER')
+        self.assertEqual(plan['uploads'],[])
+
+    def test_retained_local_order_keeps_tracking_link_during_delete_conflict(self):
+        key=self.tracking_record('ORDER')
+        self.edit(self.b,'로컬 수정')
+        with self.a.db:self.a.db.execute('DELETE FROM orders WHERE id=?',('ORDER',))
+        self.server.cycle(self.sa)
+        self.server.version+=1
+        self.server.rows[key]={**self.server.rows[key],
+            'payload':{**self.server.rows[key]['payload'],'order_id':'ORDER','reason':'갱신'},'revision':self.server.version}
+        plan=self.server.cycle(self.sb)
+        self.assertTrue(any(row['table_name']=='orders' for row in plan['conflicts'].values()))
+        self.assertEqual(self.b.db.execute('SELECT COUNT(*) FROM orders').fetchone()[0],1)
+        self.assertEqual(self.b.db.execute('SELECT order_id FROM tracking_rows').fetchone()[0],'ORDER')
+        self.assertFalse(any(row['table_name']=='tracking_rows' for row in plan['uploads']))
     def test_login_refresh_is_single_and_reused(self):
         transport=SyncTransport(self.folder,{'supabase_url':'https://example.invalid','supabase_publishable_key':'public'})
         transport.session={'refresh_token':'old'}

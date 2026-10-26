@@ -135,6 +135,32 @@ class IncrementalSync:
             elif cloud!=old:
                 conflicts[key]={'local':local,'remote':cloud,'table_name':table,'revision':revision};continue
             uploads.append({'row_key':key,'table_name':table,'payload':local,'deleted':local is None,'expected_revision':revision})
+        # A stale PC can publish a tracking update after its linked order was
+        # deleted in an earlier revision. Reproduce order_id's ON DELETE SET
+        # NULL semantics even when the parent tombstone is outside this delta.
+        # Keep all tracking evidence, and only detach a confirmed tombstone;
+        # an unknown parent or a locally retained order is not a deletion.
+        order_ids={row['payload']['id'] for row in current.values()
+            if row['table_name']=='orders' and row.get('payload')}
+        for item in incoming:
+            if item['table_name']!='orders':continue
+            if item['payload'] is not None:order_ids.add(item['payload']['id'])
+            else:
+                old=current.get(item['row_key'],{}).get('payload')
+                if old:order_ids.discard(old['id'])
+        for item in incoming:
+            payload=item['payload']
+            if item['table_name']!='tracking_rows' or not payload:continue
+            order_id=payload.get('order_id')
+            if order_id is None or order_id in order_ids:continue
+            parent=merged.get(record_key('orders',{'id':order_id},['id']))
+            if parent is None or parent['payload'] is not None:continue
+            row=merged[item['row_key']]
+            updated={**payload,'order_id':None}
+            item['payload']=updated
+            merged[item['row_key']]={**row,'payload':updated}
+            forced_changes.append({'row_key':item['row_key'],'table_name':'tracking_rows',
+                'payload':updated,'deleted':False,'expected_revision':row['revision']})
         uploads_by_key={item['row_key']:item for item in uploads}
         uploads_by_key.update({item['row_key']:item for item in forced_changes})
         return {'uploads':list(uploads_by_key.values()),'incoming':incoming,'baseline':merged,'conflicts':conflicts}
